@@ -243,8 +243,42 @@ class AiterAttnBackend(AttentionBackend):
                 f"Provided {self.num_head} number of heads.\n"
                 "Try adjusting tensor_parallel_size value."
             )
-            self.num_head_padded = 16 if self.num_head < 16 else self.num_head
-            self.head_repeat_factor = 16 // self.num_head if self.num_head < 16 else 1
+            # SGLANG_AITER_MLA_DISABLE_HEAD_PAD gated (edited_patch/aiter_backend_no_head_pad.py)
+            # ROCm/aiter PR #2917 adds a native qh=8 MLA decode kernel for mi300/mi350.
+            # In this image (built against that PR) the default is to NOT pad H=8 up to
+            # H=16 so the new kernel runs natively; set SGLANG_AITER_MLA_DISABLE_HEAD_PAD=0
+            # at runtime to restore the original repeat-interleave-to-16 behaviour.
+            # H=4 keeps padding (no native qh=4 kernel exists in PR #2917).
+            _disable_head_pad = (
+                __import__("os").environ.get("SGLANG_AITER_MLA_DISABLE_HEAD_PAD", "1")
+                != "0"
+            )
+            if _disable_head_pad and self.num_head == 8:
+                self.num_head_padded = self.num_head
+                self.head_repeat_factor = 1
+            else:
+                self.num_head_padded = 16 if self.num_head < 16 else self.num_head
+                self.head_repeat_factor = (
+                    16 // self.num_head if self.num_head < 16 else 1
+                )
+            try:
+                import os as _os
+                import sys as _sys
+
+                if _os.environ.get("LOCAL_RANK", "0") in ("0", ""):
+                    _sys.stderr.write(
+                        "[aiter_backend_patched] layer init: "
+                        f"num_head={self.num_head} "
+                        f"num_head_padded={self.num_head_padded} "
+                        f"head_repeat_factor={self.head_repeat_factor} "
+                        f"DISABLE_HEAD_PAD="
+                        f"{_os.environ.get('SGLANG_AITER_MLA_DISABLE_HEAD_PAD','<unset>')} "
+                        f"MLA_PERSIST="
+                        f"{_os.environ.get('SGLANG_AITER_MLA_PERSIST','<unset>')}\n"
+                    )
+                    _sys.stderr.flush()
+            except Exception:
+                pass
 
             self.enable_dp_attention = is_dp_attention_enabled()
             self.qo_indptr_ = torch.zeros(
@@ -265,8 +299,11 @@ class AiterAttnBackend(AttentionBackend):
             # only use mla_ps_kernel when fp8 kv_cache
             # for non-fp8 kv_cache on tp8, use non-persist kernel to avoid performance degradation
             # head_num=16 (tp8 perf issue), head_num=128 (unsupported, like tp1 or --enable-dp-attention with tp8-dp8)
+            # PR ROCm/aiter#2917 introduces qh=8 *non-persistent* kernels for mi300/mi350,
+            # so when we keep H=8 unpadded we must take the non-persist path the same way
+            # H=16 / H=128 already do.
             if (
-                self.num_head_padded == 16 or self.num_head_padded == 128
+                self.num_head_padded in (8, 16, 128)
             ) and self.kv_cache_dtype is not fp8_dtype:
                 _use_mla_ps_kernel = False
                 fast_mode = False
@@ -2477,6 +2514,23 @@ class AiterAttnBackend(AttentionBackend):
                     slot_mapping_swa.long() if layer.sliding_window_size > 0 else None,
                     k_scale=k_descale,
                     v_scale=v_descale,
+                )
+            elif self.use_triton_unified_attention and self.kv_cache_dtype == fp8_dtype:
+                # [PATCH] FP8 non-SWA: use launch_reshape_and_cache_flash to
+                # fuse bf16→fp8 cast + paged write in one Triton kernel,
+                # eliminating separate float8_copy + store_kvcache overhead.
+                token_to_kv_pool = forward_batch.token_to_kv_pool
+                k_cache, v_cache = token_to_kv_pool.get_kv_buffer(layer.layer_id)
+                launch_reshape_and_cache_flash(
+                    k.view(-1, layer.tp_k_head_num, layer.qk_head_dim),
+                    v.view(-1, layer.tp_v_head_num, layer.v_head_dim),
+                    k_cache.view(
+                        -1, self.page_size, layer.tp_k_head_num, layer.qk_head_dim
+                    ),
+                    v_cache.view(
+                        -1, self.page_size, layer.tp_v_head_num, layer.v_head_dim
+                    ),
+                    forward_batch.out_cache_loc,
                 )
             else:
                 forward_batch.token_to_kv_pool.set_kv_buffer(
