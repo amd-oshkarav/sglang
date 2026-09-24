@@ -84,11 +84,13 @@ class QuarkW4A4MXFp4MoE(QuarkMoEScheme):
         input_config: dict[str, Any],
         is_checkpoint_mxfp4_serialized: bool = True,
         dequantization_config: QuantizationConfig | None = None,
+        quantize_shared_expert_online: bool = False,
     ):
         self.weight_quant = weight_config
         self.input_quant = input_config
         self.is_checkpoint_mxfp4_serialized = is_checkpoint_mxfp4_serialized
         self.dequantization_config = dequantization_config
+        self.quantize_shared_expert_online = quantize_shared_expert_online
 
         weight_qscheme = self.weight_quant.get("qscheme")
         input_qscheme = self.input_quant.get("qscheme")
@@ -216,6 +218,14 @@ class QuarkW4A4MXFp4MoE(QuarkMoEScheme):
 
         if self.is_checkpoint_mxfp4_serialized:
             weight_loader = original_weight_loader
+            if self.quantize_shared_expert_online and getattr(
+                layer, "_has_fused_shared", False
+            ):
+                # The routed experts arrive packed FP4; only the fused shared
+                # slot arrives BF16 and has to be quantized on the way in.
+                weight_loader = self.get_online_shared_expert_weight_loader(
+                    layer, original_weight_loader
+                )
             weight_device = torch.get_default_device()
             weight_dtype = torch.uint8
         else:
@@ -606,6 +616,90 @@ class QuarkW4A4MXFp4MoE(QuarkMoEScheme):
                 self._quantize_w2_online(layer, dynamic_mxfp4_quant)
 
         return online_mxfp4_moe_weight_loader
+
+    def get_online_shared_expert_weight_loader(self, layer, original_weight_loader):
+        """Loader for an MXFP4 checkpoint whose shared-expert body is BF16.
+
+        The routed experts are serialized MXFP4 and load unchanged. Only the
+        fused shared slot arrives in higher precision, and it cannot be copied
+        into the packed FP4 buffers as it stands, so it is quantized here.
+        """
+
+        def online_shared_expert_weight_loader(
+            param: torch.nn.Parameter,
+            loaded_weight: torch.Tensor,
+            weight_name: str,
+            shard_id: str,
+            expert_id: int | None,
+        ):
+            if (
+                expert_id is None
+                or expert_id < layer._num_global_routed
+                or not loaded_weight.is_floating_point()
+            ):
+                original_weight_loader(
+                    param, loaded_weight, weight_name, shard_id, expert_id
+                )
+                return
+
+            if dynamic_mxfp4_quant is None:
+                raise NotImplementedError(
+                    "Fusing a BF16 shared expert into MXFP4 routed experts needs "
+                    "aiter's dynamic_mxfp4_quant, which is AMD ROCm only."
+                )
+
+            self._load_shared_expert_as_mxfp4(
+                layer,
+                loaded_weight,
+                shard_id,
+                expert_id - layer._num_global_routed + layer._num_local_routed,
+            )
+
+        return online_shared_expert_weight_loader
+
+    def _load_shared_expert_as_mxfp4(
+        self,
+        layer,
+        loaded_weight: torch.Tensor,
+        shard_id: str,
+        expert_id: int,
+    ) -> None:
+        """Quantize one shared-expert projection into its fused slot.
+
+        MX blocks run along K, and K is the dimension each projection keeps
+        whole under TP, so a rank can quantize its own shard and still land on
+        the values an offline-quantized checkpoint would carry.
+        """
+        if shard_id == "w2":
+            weight, scale = layer.w2_weight, layer.w2_weight_scale
+            # [hidden, intermediate]: TP splits the contraction dim, which the
+            # FP4 packing halves and the aiter alignment may pad.
+            shard_size = weight.shape[2] * 2 - layer.intermediate_pad
+            source = loaded_weight.narrow(1, shard_size * layer.moe_tp_rank, shard_size)
+            row_start, row_stop = 0, weight.shape[1]
+        else:
+            weight, scale = layer.w13_weight, layer.w13_weight_scale
+            # [2 * intermediate, hidden]: gate takes the first half of the slot
+            # and up the second. Halve the destination rather than the source so
+            # the alignment padding stays where the kernels expect it.
+            half = weight.shape[1] // 2
+            shard_size = half - layer.intermediate_pad
+            source = loaded_weight.narrow(0, shard_size * layer.moe_tp_rank, shard_size)
+            row_start = 0 if shard_id == "w1" else half
+            row_stop = row_start + half
+
+        qweight, qscale = dynamic_mxfp4_quant(source.to(layer._load_device))
+
+        # The quantizer never writes the alignment padding, so clear it instead
+        # of leaving whatever the empty allocation held.
+        weight.data[expert_id, row_start:row_stop].zero_()
+        scale.data[expert_id, row_start:row_stop].zero_()
+        weight.data[
+            expert_id, row_start : row_start + qweight.shape[0], : qweight.shape[1]
+        ] = qweight
+        scale.data[
+            expert_id, row_start : row_start + qscale.shape[0], : qscale.shape[1]
+        ] = qscale
 
     def get_online_fp8_to_mxfp4_weight_loader(self, layer, original_weight_loader):
         """

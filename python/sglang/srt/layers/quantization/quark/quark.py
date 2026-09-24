@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, cast
 
 import torch
 
+from sglang.srt.environ import envs
 from sglang.srt.layers.linear import LinearBase
 from sglang.srt.layers.moe import MoeRunnerConfig
 from sglang.srt.layers.quantization.base_config import (  # noqa: E501
@@ -37,7 +38,9 @@ from sglang.srt.layers.quantization.quark.utils import (
 )
 from sglang.srt.layers.quantization.unquant import UnquantizedLinearMethod
 from sglang.srt.layers.radix_attention import RadixAttention
-from sglang.srt.utils import get_device_capability
+from sglang.srt.utils import get_bool_env_var, get_device_capability, is_hip
+
+_use_aiter = get_bool_env_var("SGLANG_USE_AITER") and is_hip()
 
 if TYPE_CHECKING:
     from transformers import PretrainedConfig
@@ -996,6 +999,7 @@ class QuarkConfig(QuantizationConfig):
                 input_config,
                 is_checkpoint_mxfp4_serialized=self.is_prequantized,
                 dequantization_config=self.dequantization_config,
+                quantize_shared_expert_online=self.shared_expert_needs_online_mxfp4(),
             )
         elif self._is_mx_w4a8(weight_config, input_config):
             logger.info_once("Using Quark MXFP4-W/FP8-A MoE scheme")
@@ -1030,15 +1034,44 @@ class QuarkConfig(QuantizationConfig):
             for i in range(self.num_nextn_predict_layers)
         )
 
-    def can_fuse_shared_expert(self) -> bool:
-        # Shared-expert body excluded from quant; the gate must not veto fusion.
-        if any(
+    def shared_expert_excluded_from_quant(self) -> bool:
+        """Whether the target model's shared-expert body is left unquantized.
+
+        The shared_expert_gate is a separate tiny linear that stays BF16 in
+        every checkpoint, and draft-stack entries say nothing about how the
+        target stores its shared experts, so neither counts.
+        """
+        return any(
             "shared_expert" in layer
             and "shared_expert_gate" not in layer
             and not self._is_draft_layer(layer)
             for layer in self.exclude_layers
-        ):
-            return False
+        )
+
+    def shared_expert_needs_online_mxfp4(self) -> bool:
+        """Whether the fused shared slot has to be quantized while loading.
+
+        Quark MXFP4 checkpoints (Qwen3.5, Qwen3.8) ship a BF16 shared expert
+        alongside MXFP4 routed experts. Copying those BF16 weights into the
+        packed FP4 expert buffers unchanged produces garbage, so fusion is
+        only available if the shared expert is quantized on the way in.
+        """
+        global_quant_config = self.quant_config.get("global_quant_config") or {}
+        return (
+            _use_aiter
+            and envs.SGLANG_FUSE_SHARED_EXPERTS_ONLINE_MXFP4.get()
+            and self._is_mx_fp4(
+                global_quant_config.get("weight"),
+                global_quant_config.get("input_tensors"),
+            )
+            and self.shared_expert_excluded_from_quant()
+        )
+
+    def can_fuse_shared_expert(self) -> bool:
+        if self.shared_expert_excluded_from_quant():
+            # A BF16 shared-expert body cannot share the packed FP4 buffers of
+            # the routed experts unless it is quantized at load time.
+            return self.shared_expert_needs_online_mxfp4()
 
         # No per-layer config -> uniform spec, nothing to compare.
         layer_quant_config = self.quant_config.get("layer_quant_config") or {}
