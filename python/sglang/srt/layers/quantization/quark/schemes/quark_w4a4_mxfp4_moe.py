@@ -116,6 +116,14 @@ class QuarkW4A4MXFp4MoE(QuarkMoEScheme):
                 "More details at https://docs.sglang.io/advanced_features/quantization.html#online-quantization."
             )
 
+        if self.quantize_shared_expert_online:
+            logger.info_once(
+                "Quantizing the BF16 shared expert to MXFP4 while loading so it can be fused "
+                "into the routed experts. Beware that this optimization may degrade prediction "
+                "quality - please validate your model accuracy. Unset "
+                "SGLANG_FUSE_SHARED_EXPERTS_ONLINE_MXFP4 to keep the shared expert standalone."
+            )
+
     @classmethod
     def get_min_capability(cls) -> int:
         return 70
@@ -666,15 +674,24 @@ class QuarkW4A4MXFp4MoE(QuarkMoEScheme):
     ) -> None:
         """Quantize one shared-expert projection into its fused slot.
 
-        MX blocks run along K, and K is the dimension each projection keeps
-        whole under TP, so a rank can quantize its own shard and still land on
-        the values an offline-quantized checkpoint would carry.
+        A rank only ever sees its own shard, so it can only reproduce the values
+        an offline-quantized checkpoint would carry if no MX block straddles a
+        rank boundary. MX blocks run along K: for gate/up K is the hidden size,
+        which TP leaves whole, and for down K is the intermediate size, which TP
+        does split -- but only at multiples of the block size.
         """
         if shard_id == "w2":
             weight, scale = layer.w2_weight, layer.w2_weight_scale
             # [hidden, intermediate]: TP splits the contraction dim, which the
             # FP4 packing halves and the aiter alignment may pad.
             shard_size = weight.shape[2] * 2 - layer.intermediate_pad
+            if shard_size % OCP_MX_BLOCK_SIZE:
+                raise ValueError(
+                    f"Shared-expert down projection shard of {shard_size} columns "
+                    f"is not a multiple of the MX block size {OCP_MX_BLOCK_SIZE}, "
+                    "so a block would straddle a TP rank boundary and the fused "
+                    "slot would not match an offline-quantized checkpoint."
+                )
             source = loaded_weight.narrow(1, shard_size * layer.moe_tp_rank, shard_size)
             row_start, row_stop = 0, weight.shape[1]
         else:
