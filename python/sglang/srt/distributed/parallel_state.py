@@ -180,6 +180,25 @@ def _register_group(group: "GroupCoordinator") -> None:
     _groups[group.unique_name] = weakref.ref(group)
 
 
+def init_flydsl_quick_reduce_after_graph_capture() -> None:
+    """Open FlyDSL on every live QuickReduce group after CUDA-graph capture.
+
+    Each rank calls this once its own target and draft captures have
+    returned. The compile collective inside QuickReduce then waits for the
+    other ranks of that group.
+    """
+    seen: set[int] = set()
+    for ref in list(_groups.values()):
+        group = ref()
+        if group is None:
+            continue
+        qr_comm = getattr(group, "qr_comm", None)
+        if qr_comm is None or id(qr_comm) in seen:
+            continue
+        seen.add(id(qr_comm))
+        qr_comm.init_flydsl_after_capture()
+
+
 @register_custom_op(mutates_args=["tensor"])
 @register_split_op()
 def inplace_all_reduce(tensor: torch.Tensor, group_name: str) -> None:

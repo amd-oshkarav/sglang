@@ -38,6 +38,26 @@ def qr_rocm_arch_available():
         return False
 
 
+def _flydsl_int4_available() -> bool:
+    """Whether this process can run AITER FlyDSL INT4 QuickReduce.
+
+    True only on gfx950 when SGLANG_USE_AITER is on and AITER exports
+    QuickAllReduceInt4. Any other host keeps the HIP INT4 kernel.
+    """
+    from sglang.srt.environ import envs
+    from sglang.srt.utils import is_gfx95_supported
+
+    if not envs.SGLANG_USE_AITER.get():
+        return False
+    if not is_gfx95_supported():
+        return False
+    try:
+        from aiter.ops.flydsl import QuickAllReduceInt4  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 class QuickReduceRegime(Enum):
     FP = 0
     INT8 = 1
@@ -47,9 +67,14 @@ class QuickReduceRegime(Enum):
 
 
 MB = 1024 * 1024
+# AITER custom all-reduce keeps payloads up to its default 64 MiB cap.
+# FlyDSL replaces HIP QuickReduce only strictly above that cap.
+_FLYDSL_INT4_MIN_BYTES = 64 * MB
 
 
 class QuickAllReduce:
+    # Set before __init__ returns so close() is safe on a half-built instance.
+    _flydsl_int4 = None
     _SUPPORTED_WORLD_SIZES = [2, 4, 8]
     _SUPPORTED_DTYPES = [torch.float16, torch.bfloat16]
     # The following data is based on kernel tests.
@@ -86,6 +111,8 @@ class QuickAllReduce:
         are in the same node.
         """
         self.disabled = True
+        self._flydsl_int4 = None
+        self._ptr = 0
         if not qr_rocm_arch_available():
             logger.debug(
                 "Custom quick allreduce is only supported on ROCm MI300 series."
@@ -194,7 +221,8 @@ class QuickAllReduce:
         # TODO: If the dtype is not bfloat16 or then float16,
         # quickallreduce should not be created.
 
-        # ROCM_QUICK_REDUCE_MAX_SIZE_BYTES_MB is specified in MB
+        # ROCM_QUICK_REDUCE_MAX_SIZE_BYTES_MB is specified in MB.
+        # Zero selects the HIP library default, which is 2 GB.
         qr_max_size = int(os.environ.get("ROCM_QUICK_REDUCE_MAX_SIZE_BYTES_MB", 0))
         if qr_max_size > 0:
             if qr_max_size < 1:
@@ -203,11 +231,50 @@ class QuickAllReduce:
                     "lead to error or degradation to custom allreduce or rccl."
                 )
             qr_max_size = qr_max_size * MB
-        # If qr_max_size is None, then 2GB is used by default.
+
+        # HIP QuickReduce owns its IPC workspace from the start. FlyDSL is
+        # not created here: its uncached allocation has to wait until CUDA
+        # graph capture, including AITER's buffer registration, has finished.
         self._ptr = ops.init_custom_qr(self.rank, self.world_size, qr_max_size)
         self.qr_max_size = qr_max_size if qr_max_size > 0 else ops.qr_max_size()
         self.create_shared_buffer()
         self.disabled = False
+
+    def init_flydsl_after_capture(self) -> None:
+        """Create FlyDSL after graph capture. Every rank of this group must call it.
+
+        Construction allocates an uncached IPC buffer, and compile() runs a
+        collective, so this waits until the other ranks arrive. Until then
+        every QuickReduce payload stays on the HIP kernel.
+        """
+        if self._flydsl_int4 is not None or self.disabled:
+            return
+        if (
+            self.qr_quant_level != QuickReduceRegime.INT4
+            or not _flydsl_int4_available()
+        ):
+            return
+        self._init_flydsl_int4()
+
+    def _init_flydsl_int4(self) -> None:
+        """Create FlyDSL beside the HIP workspace when this GPU can run it."""
+        from aiter.ops.flydsl import QuickAllReduceInt4
+
+        self._flydsl_int4 = QuickAllReduceInt4(
+            group=self.group,
+            device=self.device,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+        warmup = torch.empty(MB, dtype=torch.bfloat16, device=self.device)
+        self._flydsl_int4.compile(warmup, torch.empty_like(warmup))
+        torch.cuda.synchronize(self.device)
+        logger.info(
+            "Using AITER FlyDSL INT4 QuickReduce for bf16 payloads above "
+            "%d MiB; smaller payloads and ineligible ones stay on HIP "
+            "QuickReduce or custom all-reduce.",
+            _FLYDSL_INT4_MIN_BYTES // MB,
+        )
 
     def create_shared_buffer(self):
         """
@@ -250,12 +317,36 @@ class QuickAllReduce:
         # as QR uses static IPC buffer.
         if out is None:
             out = torch.empty_like(inp)
+        if self._use_flydsl_int4(inp):
+            self._flydsl_int4.allreduce(inp, out)
+            return out
         ops.qr_all_reduce(
             self._ptr, inp, out, self.qr_quant_level.value, self.use_fp16_kernels
         )
         return out
 
+    def _use_flydsl_int4(self, inp: torch.Tensor) -> bool:
+        """FlyDSL accepts a bf16 payload only above the 64 MiB custom-AR cap.
+
+        fp16, non-contiguous, and misaligned payloads stay on the HIP kernel,
+        as do payloads of 64 MiB or smaller. The HIP size window is applied
+        by should_quick_allreduce before this call.
+        """
+        nbytes = inp.numel() * inp.element_size()
+        return (
+            self._flydsl_int4 is not None
+            and self.qr_quant_level == QuickReduceRegime.INT4
+            and nbytes > _FLYDSL_INT4_MIN_BYTES
+            and inp.dtype == torch.bfloat16
+            and inp.is_contiguous()
+            and inp.data_ptr() % 16 == 0
+        )
+
     def close(self):
+        flydsl = getattr(self, "_flydsl_int4", None)
+        if flydsl is not None:
+            flydsl.close()
+            self._flydsl_int4 = None
         if not self.disabled and getattr(self, "_ptr", None):
             if ops is not None:
                 ops.qr_destroy(self._ptr)

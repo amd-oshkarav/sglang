@@ -1107,6 +1107,13 @@ class Scheduler(
         self.tp_worker.init_cuda_graphs()
         if self.draft_worker is not None:
             self.draft_worker.init_cuda_graphs()
+        # FlyDSL's IPC buffer is allocated only after every graph on this
+        # rank, including the draft worker, has been captured.
+        from sglang.srt.distributed.parallel_state import (
+            init_flydsl_quick_reduce_after_graph_capture,
+        )
+
+        init_flydsl_quick_reduce_after_graph_capture()
 
     def init_model_worker(self):
         # Load model weights.
