@@ -446,7 +446,7 @@ ARG FHT_COMMIT="46efb7d776d38638fc39f3c803eaee3dd7016bd1"
 # server selects the backend. Installed on gfx950 images only (its kernels are
 # gfx950); disable with --build-arg ENABLE_SGL_AMD_MONO=0.
 ARG ENABLE_SGL_AMD_MONO=1
-ARG SGL_AMD_MONO_REPO="https://github.com/sgl-project/sgl-amd-mono.git"
+ARG SGL_AMD_MONO_REPO="https://github.com/omirosh/sgl-amd-mono.git"
 # empty: the commit pip installed through the monokernels_hip extra
 ARG SGL_AMD_MONO_COMMIT=""
 
