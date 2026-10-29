@@ -1,6 +1,8 @@
-# Week 44, monokernel plugin
+# Week 44, monokernel plugin with the fused all-reduce RMSNorm
 
 Base image: `lmsysorg/sglang:v0.5.22-rocm10-mi35x`
+
+Branch `collector_26_10_qwen_3.8_add_rms_norm_mono_plugin` is `collector_26_10_qwen_3.8_mono_plugin` (`493cd5e719`) plus the two commits of [`add_rms_norm`](https://github.com/amd-oshkarav/sglang/tree/add_rms_norm) (`d6c69e6dc`, `91ae814b1`). These commits fuse the FlyDSL INT4 QuickReduce with the residual add and RMSNorm (AITER #6369). The second commit lets a 16384-token prefill chunk use that fusion. Start the server with `--enable-aiter-allreduce-fusion`. The tree is `add_rms_norm` without #43516 and with the sgl-amd-mono pin below.
 
 Branch `collector_26_10_qwen_3.8_mono_plugin`, cut from SGLang main at `e4d4a9a7de` (27 Oct 2026). AITER is `ROCm/aiter` main at `9059673612`.
 
