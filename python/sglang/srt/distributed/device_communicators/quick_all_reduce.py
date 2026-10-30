@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import math
 import os
 from enum import Enum
 from functools import cache
@@ -47,6 +48,30 @@ class QuickReduceRegime(Enum):
 
 
 MB = 1024 * 1024
+
+
+
+def _log_quick_reduce_overlimit(inp: torch.Tensor, use_fp16_kernels: bool) -> None:
+    """Log the largest unsafe input, or 0 when every element is in range.
+
+    With the bf16-to-fp16 cast on, the safe limit is the fp16 maximum, 65504.
+    A larger finite value or any non-finite value is reported. With the cast
+    off, only a non-finite value is unsafe. CUDA graph capture is skipped
+    because reading the value back would synchronize the stream.
+    """
+    if inp.numel() == 0:
+        return
+    if inp.is_cuda and torch.cuda.is_current_stream_capturing():
+        return
+    limit = float(
+        torch.finfo(torch.float16).max
+        if use_fp16_kernels
+        else torch.finfo(inp.dtype).max
+    )
+    peak = torch.where(torch.isfinite(inp), inp.abs(), float("inf")).max().item()
+    reported = peak if not math.isfinite(peak) or peak > limit else 0
+    rank = dist.get_rank() if dist.is_initialized() else 0
+    logger.info("QR_ENTER_OVERLIMIT rank=%s value=%s", rank, reported)
 
 
 class QuickAllReduce:
@@ -249,6 +274,7 @@ class QuickAllReduce:
         """Performs an out-of-place custom quick all reduce."""
         # quick allreduce doesn't require a separate graph mode,
         # as QR uses static IPC buffer.
+        _log_quick_reduce_overlimit(inp, bool(self.use_fp16_kernels))
         if out is None:
             out = torch.empty_like(inp)
         ops.qr_all_reduce(
