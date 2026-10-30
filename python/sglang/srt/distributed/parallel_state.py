@@ -605,22 +605,6 @@ class GroupCoordinator:
         world_size = self.world_size
         return self.ranks[(rank_in_group - 1) % world_size]
 
-    def get_available_pynccl_comm(self) -> Optional[Any]:
-        """Return the PyNccl communicator only when it initialized successfully."""
-        pynccl_comm = self.pynccl_comm
-        if pynccl_comm is None or not pynccl_comm.available:
-            return None
-        return pynccl_comm
-
-    def require_pynccl_comm(self, operation: str) -> Any:
-        """Return an available PyNccl communicator or fail with context."""
-        pynccl_comm = self.get_available_pynccl_comm()
-        if pynccl_comm is None:
-            raise RuntimeError(
-                f"{operation} requires an available PyNccl communicator."
-            )
-        return pynccl_comm
-
     @contextmanager
     def graph_capture(
         self,
@@ -668,9 +652,9 @@ class GroupCoordinator:
             # In summary: We select the appropriate allreduce method for
             #  each mode based on the algorithm order in the table and
             #  their usage conditions.
-            pynccl_comm = self.get_available_pynccl_comm()
+            pynccl_comm = self.pynccl_comm
             maybe_pynccl_context: Any
-            if pynccl_comm is None:
+            if not pynccl_comm:
                 maybe_pynccl_context = nullcontext()
             else:
                 maybe_pynccl_context = pynccl_comm.change_state(enable=True)
@@ -727,7 +711,6 @@ class GroupCoordinator:
             inplace_all_reduce(input_, group_name=self.unique_name)
             return input_
 
-        pynccl_comm = self.get_available_pynccl_comm()
         if torch.compiler.is_compiling():
             if self._can_use_flashinfer_allreduce(input_):
                 return flashinfer_allreduce(input_, group_name=self.unique_name)
@@ -747,7 +730,7 @@ class GroupCoordinator:
                 and self.qr_comm is None
                 and self.pymscclpp_comm is None
                 and self.torch_symm_mem_comm is None
-                and pynccl_comm is None
+                and self.pynccl_comm is None
             ):
                 inplace_all_reduce(input_, group_name=self.unique_name)
                 return input_
@@ -773,15 +756,15 @@ class GroupCoordinator:
             and self.qr_comm.should_quick_allreduce(input_)
         )
         if (
-            pynccl_comm is not None
+            self.pynccl_comm is not None
             and self.is_symmetric_memory_enabled()
             and not should_use_pymscclpp_allreduce
             and not should_use_quick_allreduce
             and not should_use_custom_allreduce
         ):
             self.debug_check_symmetric_mempool(self, {"input": input_}, "all_reduce")
-            with pynccl_comm.change_state(enable=True):
-                pynccl_comm.all_reduce(input_)
+            with self.pynccl_comm.change_state(enable=True):
+                self.pynccl_comm.all_reduce(input_)
                 return input_
 
         if self._can_use_flashinfer_allreduce(input_):
@@ -838,7 +821,26 @@ class GroupCoordinator:
         weight_: torch.Tensor,
         eps: float,
     ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
-        """Attempt fused all-reduce + RMSNorm via custom all-reduce communicator. ROCm/HIP Only"""
+        """Attempt fused all-reduce + RMSNorm. ROCm/HIP only.
+
+        FlyDSL INT4 QuickReduce is asked first. A payload it owns but whose
+        fused kernel declines returns None, so the caller all-reduces with
+        FlyDSL and norms separately. Falling through to custom all-reduce
+        would drop FlyDSL for the prefill sizes it is fastest on.
+        """
+        qr_comm = self.qr_comm
+        if qr_comm is not None and not getattr(qr_comm, "disabled", True):
+            should_fuse = getattr(qr_comm, "should_fused_allreduce_rmsnorm", None)
+            if should_fuse is not None and should_fuse(
+                input_, residual_inp_, weight_
+            ):
+                return qr_comm.fused_allreduce_rmsnorm(
+                    input_, residual_inp_, weight_, eps
+                )
+            uses_flydsl = getattr(qr_comm, "uses_flydsl_int4", None)
+            if uses_flydsl is not None and uses_flydsl(input_):
+                return None
+
         ca_comm = self.ca_comm
         if ca_comm is None or getattr(ca_comm, "disabled", True):
             return None
@@ -1015,10 +1017,7 @@ class GroupCoordinator:
             and self.torch_symm_mem_comm.should_torch_symm_mem_allreduce(input_)
         ):
             return "torch_symm_mem"
-        if (
-            is_in_tc_piecewise_cuda_graph()
-            and self.get_available_pynccl_comm() is not None
-        ):
+        if is_in_tc_piecewise_cuda_graph() and self.pynccl_comm is not None:
             # For piecewise cuda graph, we use pynccl outplace allreduce
             return "pynccl"
         return None
@@ -1049,7 +1048,6 @@ class GroupCoordinator:
     def _all_reduce_out_place(
         self, input_: torch.Tensor, outplace_all_reduce_method: str
     ) -> torch.Tensor:
-        pynccl_comm = self.get_available_pynccl_comm()
         if outplace_all_reduce_method == "auto":
             outplace_all_reduce_method = self._resolve_outplace_all_reduce_method(
                 input_
@@ -1062,7 +1060,7 @@ class GroupCoordinator:
                 # Force pynccl over the in-place fallback: it is graph-capture
                 # safe and NCCL is natively out-of-place, avoiding the clone
                 # the in-place fallback needs.
-                if pynccl_comm is not None:
+                if self.pynccl_comm is not None:
                     outplace_all_reduce_method = "pynccl"
                 else:
                     out = input_.clone()
@@ -1072,6 +1070,7 @@ class GroupCoordinator:
         qr_comm = self.qr_comm
         pymscclpp_comm = self.pymscclpp_comm
         torch_symm_mem_comm = self.torch_symm_mem_comm
+        pynccl_comm = self.pynccl_comm
         assert any([qr_comm, ca_comm, pymscclpp_comm, torch_symm_mem_comm, pynccl_comm])
         if outplace_all_reduce_method == "ca":
             assert not ca_comm.disabled
@@ -1094,7 +1093,7 @@ class GroupCoordinator:
         return out
 
     def _all_reduce_in_place(self, input_: torch.Tensor) -> None:
-        pynccl_comm = self.get_available_pynccl_comm()
+        pynccl_comm = self.pynccl_comm
         torch_symm_mem_comm = self.torch_symm_mem_comm
         if pynccl_comm is not None and not pynccl_comm.disabled:
             pynccl_comm.all_reduce(input_)
@@ -1149,7 +1148,7 @@ class GroupCoordinator:
         output: torch.Tensor,
         input: torch.Tensor,
     ) -> torch.Tensor:
-        pynccl_comm = self.get_available_pynccl_comm()
+        pynccl_comm = self.pynccl_comm
         if pynccl_comm is not None and (
             not pynccl_comm.disabled or self.is_symmetric_memory_enabled()
         ):
@@ -1233,7 +1232,7 @@ class GroupCoordinator:
 
     def _all_to_all_single(self, output: torch.Tensor, input: torch.Tensor) -> None:
         # pynccl path keeps the a2a exchange CUDA-graph-capturable (DCP a2a backend).
-        pynccl_comm = self.get_available_pynccl_comm()
+        pynccl_comm = self.pynccl_comm
         if pynccl_comm is not None and not pynccl_comm.disabled:
             pynccl_comm.all_to_all_single(output, input)
         else:
@@ -1288,12 +1287,16 @@ class GroupCoordinator:
         sizes: Optional[List[int]] = None,
     ) -> torch.Tensor:
         world_size = self.world_size
+        pynccl_comm = self.pynccl_comm
 
         if envs.SGLANG_ENABLE_DETERMINISTIC_INFERENCE.get():
             return self._deterministic_reduce_scatterv(input_, output, sizes)
 
-        pynccl_comm = self.require_pynccl_comm("reduce_scatterv")
         with pynccl_comm.change_state(enable=True):
+            assert pynccl_comm is not None and not pynccl_comm.disabled, (
+                "pynccl is required for reduce_scatterv"
+            )
+
             if sizes is not None:
                 assert len(sizes) == world_size
                 assert input_.shape[0] == sum(sizes)
@@ -1357,7 +1360,7 @@ class GroupCoordinator:
             pymscclpp_comm.all_gather(output, input)
             return
 
-        pynccl_comm = self.get_available_pynccl_comm()
+        pynccl_comm = self.pynccl_comm
         if pynccl_comm is not None and (
             not pynccl_comm.disabled or self.is_symmetric_memory_enabled()
         ):
@@ -1479,9 +1482,12 @@ class GroupCoordinator:
             extra output allocation + caller-side copy.
         """
         world_size = self.world_size
-        pynccl_comm = self.require_pynccl_comm("all_gatherv")
+        pynccl_comm = self.pynccl_comm
 
         with pynccl_comm.change_state(enable=True):
+            assert pynccl_comm is not None and not pynccl_comm.disabled, (
+                "pynccl is required for all_gatherv"
+            )
 
             def _all_gather_allocate_output(
                 input_: torch.Tensor,
@@ -1578,9 +1584,8 @@ class GroupCoordinator:
         if self.world_size == 1:
             return input_
 
-        pynccl_comm = self.get_available_pynccl_comm()
-        if pynccl_comm is not None and not pynccl_comm.disabled:
-            pynccl_comm.broadcast(input_, src=src)
+        if self.pynccl_comm is not None and not self.pynccl_comm.disabled:
+            self.pynccl_comm.broadcast(input_, src=src)
         else:
             # Broadcast.
             torch.distributed.broadcast(
@@ -2090,7 +2095,7 @@ class GroupCoordinator:
         if dst is None:
             dst = (self.rank_in_group + 1) % self.world_size
 
-        pynccl_comm = self.get_available_pynccl_comm()
+        pynccl_comm = self.pynccl_comm
         if pynccl_comm is not None and not pynccl_comm.disabled:
             pynccl_comm.send(tensor, dst)
         else:
@@ -2105,7 +2110,7 @@ class GroupCoordinator:
             src = (self.rank_in_group - 1) % self.world_size
 
         tensor = torch.empty(size, dtype=dtype, device=self.device)
-        pynccl_comm = self.get_available_pynccl_comm()
+        pynccl_comm = self.pynccl_comm
         if pynccl_comm is not None and not pynccl_comm.disabled:
             pynccl_comm.recv(tensor, src)
         else:
@@ -2738,12 +2743,9 @@ def initialize_model_parallel(
             rank_offset=rank_offset,
             max_world_size=max_world_size,
         )
-        tp_pynccl_comm = _TP.get_available_pynccl_comm()
-        pdmux_pynccl_comm = _PDMUX_PREFILL_TP_GROUP.get_available_pynccl_comm()
-        if tp_pynccl_comm is not None:
-            tp_pynccl_comm.disabled = False
-        if pdmux_pynccl_comm is not None:
-            pdmux_pynccl_comm.disabled = False
+        if _TP.pynccl_comm:
+            _TP.pynccl_comm.disabled = False
+            _PDMUX_PREFILL_TP_GROUP.pynccl_comm.disabled = False
 
     # Build decode context-parallel groups inside each TP group only when DCP is enabled.
     global _DCP
