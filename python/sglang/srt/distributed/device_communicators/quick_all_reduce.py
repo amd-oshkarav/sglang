@@ -259,6 +259,15 @@ class QuickAllReduce:
         # If qr_max_size is None, then 2GB is used by default.
         self._ptr = ops.init_custom_qr(self.rank, self.world_size, qr_max_size)
         self.qr_max_size = qr_max_size if qr_max_size > 0 else ops.qr_max_size()
+        # A positive floor refuses smaller messages so they fall through to
+        # custom all-reduce. Zero keeps the per-codec table as the only floor.
+        qr_min_size = int(os.environ.get("ROCM_QUICK_REDUCE_MIN_SIZE_BYTES_MB", 0))
+        self.qr_min_size_override = qr_min_size * MB if qr_min_size > 0 else 0
+        if self.qr_min_size_override:
+            logger.info(
+                "QuickReduce minimum size raised to %d MiB",
+                qr_min_size,
+            )
         self.create_shared_buffer()
         self.disabled = False
 
@@ -291,11 +300,12 @@ class QuickAllReduce:
         dtype = inp.dtype
         if self.use_fp16_kernels:
             dtype = torch.float16
-        return (
-            inp_size <= self.qr_max_size
-            and inp_size
-            >= self._QR_MIN_SIZE[(dtype, self.world_size)][self.qr_quant_level.value]
-        )
+        min_size = self._QR_MIN_SIZE[(dtype, self.world_size)][
+            self.qr_quant_level.value
+        ]
+        if self.qr_min_size_override > min_size:
+            min_size = self.qr_min_size_override
+        return inp_size <= self.qr_max_size and inp_size >= min_size
 
     def quick_all_reduce(self, inp: torch.Tensor, *, out: torch.Tensor = None):
         """Performs an out-of-place custom quick all reduce."""
@@ -358,6 +368,7 @@ _QUICK_REDUCE_ENV_ALIASES = {
     "ROCM_QUICK_REDUCE_QUANTIZATION": "AITER_QUICK_REDUCE_QUANTIZATION",
     "ROCM_QUICK_REDUCE_CAST_BF16_TO_FP16": "AITER_QUICK_REDUCE_CAST_BF16_TO_FP16",
     "ROCM_QUICK_REDUCE_MAX_SIZE_BYTES_MB": "AITER_QUICK_REDUCE_MAX_SIZE_BYTES_MB",
+    "ROCM_QUICK_REDUCE_MIN_SIZE_BYTES_MB": "AITER_QUICK_REDUCE_MIN_SIZE_BYTES_MB",
 }
 
 # Codecs served by the bundled INT8 codec. AITER has no INT8 codec, and
