@@ -95,6 +95,8 @@ def _log_quick_reduce_range(
         cliff = levels / float(torch.finfo(torch.float16).max)
         if bool(((block_peak > 0) & (block_peak < cliff)).any().item()):
             small = 0
+    if large == "none" and small == "none":
+        return
     rank = dist.get_rank() if dist.is_initialized() else 0
     logger.info("QR_ENTER rank=%s large=%s small=%s", rank, large, small)
 
