@@ -51,27 +51,52 @@ MB = 1024 * 1024
 
 
 
-def _log_quick_reduce_overlimit(inp: torch.Tensor, use_fp16_kernels: bool) -> None:
-    """Log the largest unsafe input, or 0 when every element is in range.
+# CodecQ4 / Q6 / Q8 level counts. With the fp16 cast, a 32-value block whose
+# largest magnitude is below L / 65504 makes the encode scale saturate.
+_QR_FP16_BLOCK = 32
+_QR_SMALL_BLOCK_LEVELS = {
+    QuickReduceRegime.INT4: 8,
+    QuickReduceRegime.INT6: 32,
+    QuickReduceRegime.INT8: 128,
+}
 
-    With the bf16-to-fp16 cast on, the safe limit is the fp16 maximum, 65504.
-    A larger finite value or any non-finite value is reported. With the cast
-    off, only a non-finite value is unsafe. CUDA graph capture is skipped
-    because reading the value back would synchronize the stream.
+
+def _log_quick_reduce_range(
+    inp: torch.Tensor, use_fp16_kernels: bool, quant_level: QuickReduceRegime
+) -> None:
+    """Log a too-large input, and 0 when a block is too small to quantize.
+
+    ``large`` is inf or the largest finite value above the fp16 maximum,
+    65504, when the cast is on. ``small`` is 0 when any 32-value block has a
+    positive peak below that codec's fp16 reciprocal cliff. Either field is
+    ``none`` when that case is absent. A block of exact zeros is not too
+    small. CUDA graph capture is skipped because reading the values back
+    would synchronize the stream.
     """
     if inp.numel() == 0:
         return
     if inp.is_cuda and torch.cuda.is_current_stream_capturing():
         return
-    limit = float(
-        torch.finfo(torch.float16).max
-        if use_fp16_kernels
-        else torch.finfo(inp.dtype).max
-    )
-    peak = torch.where(torch.isfinite(inp), inp.abs(), float("inf")).max().item()
-    reported = peak if not math.isfinite(peak) or peak > limit else 0
+    finite = torch.isfinite(inp)
+    magnitude = torch.where(finite, inp.abs(), float("inf"))
+    peak = magnitude.max().item()
+    large = "none"
+    if use_fp16_kernels:
+        limit = float(torch.finfo(torch.float16).max)
+        if not math.isfinite(peak) or peak > limit:
+            large = peak
+    elif not math.isfinite(peak):
+        large = peak
+    small = "none"
+    levels = _QR_SMALL_BLOCK_LEVELS.get(quant_level) if use_fp16_kernels else None
+    if levels is not None and magnitude.numel() >= _QR_FP16_BLOCK:
+        usable = magnitude.numel() // _QR_FP16_BLOCK * _QR_FP16_BLOCK
+        block_peak = magnitude.flatten()[:usable].view(-1, _QR_FP16_BLOCK).max(dim=1).values
+        cliff = levels / float(torch.finfo(torch.float16).max)
+        if bool(((block_peak > 0) & (block_peak < cliff)).any().item()):
+            small = 0
     rank = dist.get_rank() if dist.is_initialized() else 0
-    logger.info("QR_ENTER_OVERLIMIT rank=%s value=%s", rank, reported)
+    logger.info("QR_ENTER rank=%s large=%s small=%s", rank, large, small)
 
 
 class QuickAllReduce:
@@ -274,7 +299,9 @@ class QuickAllReduce:
         """Performs an out-of-place custom quick all reduce."""
         # quick allreduce doesn't require a separate graph mode,
         # as QR uses static IPC buffer.
-        _log_quick_reduce_overlimit(inp, bool(self.use_fp16_kernels))
+        _log_quick_reduce_range(
+            inp, bool(self.use_fp16_kernels), self.qr_quant_level
+        )
         if out is None:
             out = torch.empty_like(inp)
         ops.qr_all_reduce(
