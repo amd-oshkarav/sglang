@@ -91,6 +91,10 @@ _is_musa = is_musa()
 # rows / NaN under DP attention + TP MoE on MI355X). Set to 0 to restore it.
 _AITER_CAPTURE_COPY_IN = os.environ.get("SGLANG_AITER_CAPTURE_COPY_IN", "0") == "1"
 
+# On ROCm, try QuickReduce before custom all-reduce when this is 1.
+# The default keeps custom all-reduce in front of QuickReduce.
+_QR_FIRST = os.environ.get("SGLANG_QR_FIRST", "0") == "1"
+
 TensorMetadata = namedtuple("TensorMetadata", ["device", "dtype", "size"])
 
 # use int value instead of ReduceOp.SUM to support torch compile
@@ -455,8 +459,7 @@ class GroupCoordinator:
         self.debug_check_symmetric_mempool = debug_check_symmetric_mempool
         if is_hip():
             from sglang.srt.distributed.device_communicators.quick_all_reduce import (
-                QuickAllReduce,
-                qr_rocm_arch_available,
+                create_quick_allreduce,
             )
 
         self.pynccl_comm: Optional[PyNcclCommunicator] = None
@@ -476,7 +479,7 @@ class GroupCoordinator:
             )
 
         self.ca_comm: Optional[Any] = None
-        self.qr_comm: Optional[QuickAllReduce] = None
+        self.qr_comm: Optional[Any] = None
 
         self.pcie_ipc_comm: Optional[Any] = None
         from sglang.srt.distributed.device_communicators.pcie_ipc_ar import (
@@ -516,18 +519,17 @@ class GroupCoordinator:
                     "warning, specify --disable-custom-all-reduce explicitly."
                 )
 
-            if is_hip():
-                try:
-                    # Initialize a custom quick all-reduce implementation for AMD
-                    # when rocm >= gfx942. Quick reduce is designed as a
-                    # complement to custom allreduce.
-                    # Based on quickreduce (https://github.com/mk1-project/quickreduce).
-                    if qr_rocm_arch_available():
-                        self.qr_comm = QuickAllReduce(
-                            group=self.cpu_group, device=self.device
-                        )
-                except Exception as e:
-                    logger.warning(f"Failed to initialize QuickAllReduce: {e}")
+            # QuickReduce codecs are lossy, and whether a message uses one
+            # depends on its size, so deterministic runs must not use it.
+            if is_hip() and not self._deterministic_collectives_enabled():
+                # Prefer AITER QuickReduce when globally enabled and
+                # available; otherwise retain the bundled implementation.
+                # Constructor failures must propagate to prevent ranks from
+                # selecting different collective implementations.
+                # Based on quickreduce (https://github.com/mk1-project/quickreduce).
+                self.qr_comm = create_quick_allreduce(
+                    group=self.cpu_group, device=self.device
+                )
         elif self.world_size > 1 and is_hip():
             logger.info("[AR] All-reduce call path: NCCL (custom AR disabled)")
 
@@ -768,10 +770,17 @@ class GroupCoordinator:
             and not self.ca_comm.disabled
             and self.ca_comm.should_custom_ar(input_)
         )
+        should_use_quick_allreduce = (
+            is_hip()
+            and self.qr_comm is not None
+            and not self.qr_comm.disabled
+            and self.qr_comm.should_quick_allreduce(input_)
+        )
         if (
             pynccl_comm is not None
             and self.is_symmetric_memory_enabled()
             and not should_use_pymscclpp_allreduce
+            and not should_use_quick_allreduce
             and not should_use_custom_allreduce
         ):
             self.debug_check_symmetric_mempool(self, {"input": input_}, "all_reduce")
@@ -785,6 +794,7 @@ class GroupCoordinator:
         outplace_all_reduce_method = self._resolve_outplace_all_reduce_method(
             input_=input_,
             should_use_pymscclpp_allreduce=should_use_pymscclpp_allreduce,
+            should_use_quick_allreduce=should_use_quick_allreduce,
         )
         if outplace_all_reduce_method is not None:
             return outplace_all_reduce(
@@ -967,19 +977,40 @@ class GroupCoordinator:
         self,
         input_: torch.Tensor,
         should_use_pymscclpp_allreduce: Optional[bool] = None,
+        should_use_quick_allreduce: Optional[bool] = None,
     ) -> Optional[str]:
+        is_rocm = is_hip()
         if should_use_pymscclpp_allreduce is None:
             should_use_pymscclpp_allreduce = (
                 self.pymscclpp_comm is not None
                 and self.pymscclpp_comm.should_mscclpp_allreduce(input_)
             )
-        if (
+        if should_use_quick_allreduce is None:
+            should_use_quick_allreduce = (
+                is_rocm
+                and self.qr_comm is not None
+                and not self.qr_comm.disabled
+                and self.qr_comm.should_quick_allreduce(input_)
+            )
+        use_qr = is_rocm and should_use_quick_allreduce
+        use_ca = (
             self.ca_comm is not None
-            and not self.ca_comm.disabled
+            and not self.ca_comm.disabledhttps://github.com/AMD-AGI/silo-tiger-oob-benchmark-configs/blob/main/oob_configs/tier_1/mi355/sglang_deepseek-v4.1-flash_tp8_fp4.yaml
             and not should_use_pymscclpp_allreduce
             and self.ca_comm.should_custom_ar(input_)
-        ):
-            return "ca"
+        )
+        # SGLANG_QR_FIRST=1 tries QuickReduce first. The default tries
+        # custom all-reduce first, then QuickReduce.
+        if _QR_FIRST:
+            if use_qr:
+                return "qr"
+            if use_ca:
+                return "ca"
+        else:
+            if use_ca:
+                return "ca"
+            if use_qr:
+                return "qr"
         # After ``ca``: the PCIe-IPC kernels are for hosts where no fabric-specific
         # backend applies. They do not probe for NVLink, so on a host that has it
         # this ordering is what keeps the faster backend in front of them.
@@ -990,12 +1021,6 @@ class GroupCoordinator:
             and self.pcie_ipc_comm.should_pcie_ipc_ar(input_)
         ):
             return "pcie_ipc"
-        if (
-            self.qr_comm is not None
-            and not self.qr_comm.disabled
-            and self.qr_comm.should_quick_allreduce(input_)
-        ):
-            return "qr"
         if self.pymscclpp_comm is not None and should_use_pymscclpp_allreduce:
             return "pymscclpp"
         if (
