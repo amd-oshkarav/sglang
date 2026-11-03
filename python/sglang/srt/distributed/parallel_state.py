@@ -995,7 +995,7 @@ class GroupCoordinator:
         use_qr = is_rocm and should_use_quick_allreduce
         use_ca = (
             self.ca_comm is not None
-            and not self.ca_comm.disabledhttps://github.com/AMD-AGI/silo-tiger-oob-benchmark-configs/blob/main/oob_configs/tier_1/mi355/sglang_deepseek-v4.1-flash_tp8_fp4.yaml
+            and not self.ca_comm.disabled
             and not should_use_pymscclpp_allreduce
             and self.ca_comm.should_custom_ar(input_)
         )
