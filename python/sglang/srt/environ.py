@@ -1640,6 +1640,13 @@ class Envs:
     # on links that can drive more channels.
     SGLANG_DETERMINISTIC_NCCL_NCHANNELS = EnvInt(8)
     SGLANG_OPT_USE_CUSTOM_ALL_REDUCE_V2 = EnvBool(True)
+    # Path to an allreduce_configs.json written by the all-reduce tuner.
+    # Tensor-parallel groups then dispatch by message size to the backend that
+    # measured fastest -- custom all-reduce (sglang, aiter or v2), NCCL/RCCL,
+    # symmetric memory, or QuickReduce at the codec it was tuned for. The table
+    # is checked against the server setup at startup and the server refuses to
+    # start when they disagree. Unset keeps the built-in order.
+    SGLANG_TUNED_ALLREDUCE_PATH = EnvStr(None)
     # ROCm CustomAllReduceV2 workspace sharing: auto, fabric or posix_fd
     SGLANG_HIP_VMM_HANDLE_TYPE = EnvStr("auto")
     # Default per-direction workspace cap for CustomAllReduceV2; explicit

@@ -259,7 +259,14 @@ class CustomAllreduce:
             offsets = [d[1] for d in all_data]  # type: ignore
             ops.register_graph_buffers(self._ptr, handles, offsets)
 
-    def should_custom_ar(self, inp: torch.Tensor):
+    def should_custom_ar(self, inp: torch.Tensor, *, ignore_max_size: bool = False):
+        """Whether this communicator reduces ``inp``.
+
+        ``ignore_max_size`` drops the ``max_size`` threshold, for a caller that
+        has measured this kernel at this size and dispatches on that
+        measurement instead -- a tuned all-reduce table. Oversized inputs go
+        through ``_all_reduce_impl``, which stages them in pieces.
+        """
         if self.disabled:
             return False
         if inp.dtype not in self._SUPPORTED_DTYPES:
@@ -274,14 +281,14 @@ class CustomAllreduce:
         # little performance improvement over NCCL.
         if not _is_hip:
             if self.world_size == 2 or self.full_nvlink:
-                return inp_size <= self.max_size
+                return ignore_max_size or inp_size <= self.max_size
             return False
 
         if _is_hip:
             if self.use_amd_deterministic_impl:
                 return True
             if self.full_nvlink:
-                return inp_size <= self.max_size
+                return ignore_max_size or inp_size <= self.max_size
             return False
 
         return False
@@ -339,10 +346,14 @@ class CustomAllreduce:
                 flat_out[beg : beg + chunk],
             )
 
-    def custom_all_reduce(self, input: torch.Tensor) -> Optional[torch.Tensor]:
+    def custom_all_reduce(
+        self, input: torch.Tensor, *, ignore_max_size: bool = False
+    ) -> Optional[torch.Tensor]:
         """The main allreduce API that provides support for cuda graph."""
         # When custom allreduce is disabled, this will be None.
-        if self.disabled or not self.should_custom_ar(input):
+        if self.disabled or not self.should_custom_ar(
+            input, ignore_max_size=ignore_max_size
+        ):
             return None
         if self._IS_CAPTURING:
             if torch.cuda.is_current_stream_capturing():

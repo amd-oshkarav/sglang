@@ -21,6 +21,9 @@ from sglang.srt.arg_groups.overrides import (
     run_post_process_pass,
 )
 from sglang.srt.configs.unlimited_ocr_v2 import UocrDocumentConfig
+from sglang.srt.distributed.device_communicators.allreduce_tune_table import (
+    validate_tuned_table,
+)
 from sglang.srt.distributed.device_communicators.mooncake_transfer_engine import (
     parse_ib_device_config,
 )
@@ -323,6 +326,10 @@ def check_server_args(server_args: Any):
             "registries that never become ready. Launch one prefill server per "
             "replica, or unset SGLANG_RUST_SERVER."
         )
+
+    # Before any worker spawns: a table that does not describe this setup names
+    # kernels the server would then serve under the wrong measurement.
+    validate_tuned_table(tp_size=cfg.tp_size, ep_size=cfg.ep_size)
 
     assert cfg.base_gpu_id >= 0, "base_gpu_id must be non-negative"
     assert cfg.gpu_id_step >= 1, "gpu_id_step must be positive"

@@ -220,9 +220,19 @@ class QuickAllReduce:
         dist.all_gather_object(handles, handle, group=self.group)
         ops.qr_open_handles(self._ptr, handles)
 
-    def should_quick_allreduce(self, inp: torch.Tensor):
-        """
-        Check if quickreduce is available
+    def should_quick_allreduce(
+        self,
+        inp: torch.Tensor,
+        *,
+        ignore_min_size: bool = False,
+        ignore_max_size: bool = False,
+    ):
+        """Check if quickreduce is available.
+
+        ``ignore_min_size`` skips the kernel-test floor in ``_QR_MIN_SIZE`` and
+        ``ignore_max_size`` skips ``qr_max_size``. A tuned table sets both: its
+        rows replace those thresholds, having measured what they estimate.
+        Alignment and dtype checks still apply.
         """
         if self.disabled:
             return False
@@ -241,9 +251,12 @@ class QuickAllReduce:
         dtype = inp.dtype
         if self.use_fp16_kernels:
             dtype = torch.float16
+        if not ignore_max_size and inp_size > self.qr_max_size:
+            return False
+        if ignore_min_size:
+            return True
         return (
-            inp_size <= self.qr_max_size
-            and inp_size
+            inp_size
             >= self._QR_MIN_SIZE[(dtype, self.world_size)][self.qr_quant_level.value]
         )
 
