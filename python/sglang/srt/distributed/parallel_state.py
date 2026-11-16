@@ -206,22 +206,11 @@ def _default_flydsl_qrint4_fused_allreduce_rmsnorm(qr_comm, inp, residual, weigh
     return False, None
 
 
-def _tuned_qr_codec_comm(group, decision):
-    """QuickAllReduce opened for a ``qr:<codec>`` tune-table choice."""
-    if not isinstance(decision, str) or not decision.startswith("qr:"):
-        return None
-    by_quant = getattr(group, "qr_by_quant", None)
-    if not by_quant:
-        return None
-    return by_quant.get(decision.split(":", 1)[1])
-
-
 def _flydsl_qrint4_fused_allreduce_rmsnorm(group, inp, residual, weight, eps):
-    """One fusion entry for a tuned FlyDSL row and for a default QuickReduce row.
+    """One fusion entry for a tuned FlyDSL row and for the default QuickReduce.
 
-    A tuned decision names the kernel. ``qr_flydsl`` fuses that communicator.
-    A ``qr:<codec>`` row fuses when that QuickReduce's own FlyDSL INT4 owns
-    the row, which is how an INT4 codec built from the table still fuses.
+    ``qr_flydsl`` fuses the tune table's FlyDSL communicator. A ``qr:<codec>``
+    name, including ``qr:INT4``, is the HIP QuickReduce and does not fuse here.
     Any other concrete tuned choice leaves this helper, and the caller keeps
     the custom all-reduce fused kernel. With no tuned decision, the default
     QuickReduce fuses the rows its FlyDSL INT4 owns.
@@ -238,13 +227,6 @@ def _flydsl_qrint4_fused_allreduce_rmsnorm(group, inp, residual, weight, eps):
                 eps,
             )
             return True, fused
-        qr_tuned = _tuned_qr_codec_comm(group, decision)
-        if qr_tuned is not None:
-            handled, fused = _default_flydsl_qrint4_fused_allreduce_rmsnorm(
-                qr_tuned, inp, residual, weight, eps
-            )
-            if handled:
-                return True, fused
         if isinstance(decision, str):
             return False, None
     return _default_flydsl_qrint4_fused_allreduce_rmsnorm(
@@ -255,13 +237,16 @@ def _flydsl_qrint4_fused_allreduce_rmsnorm(group, inp, residual, weight, eps):
 def flydsl_qrint4_fused_limit_bytes(group, inp) -> Optional[int]:
     """Workspace ceiling for this row, or None to keep the 64 MB custom-AR cap.
 
-    The ceiling follows the same choice as the fusion entry: the tuned FlyDSL
-    communicator, the QuickReduce codec the table selected when that codec
-    runs FlyDSL INT4, or the default QuickReduce when the table has no choice.
+    The ceiling follows the fusion entry. The tuned FlyDSL communicator widens
+    it. A HIP QuickReduce codec from the table, including INT4, keeps the
+    64 MB cap. With no tuned decision the default QuickReduce supplies its
+    FlyDSL ceiling.
     """
     tuned = getattr(group, "_tuned_outplace_method", None)
     if tuned is not None:
         decision = tuned(inp)
+        if isinstance(decision, str) and decision != "qr_flydsl":
+            return None
         if decision == "qr_flydsl":
             comm = getattr(group, "qr_flydsl_comm", None)
             if comm is None or not _flydsl_quick_allreduce_fits(comm, inp):
@@ -271,16 +256,6 @@ def flydsl_qrint4_fused_limit_bytes(group, inp) -> Optional[int]:
             if supports is None or not bool(supports(inp.shape[-1], nbytes)):
                 return None
             return int(nbytes)
-        qr_tuned = _tuned_qr_codec_comm(group, decision)
-        if qr_tuned is not None:
-            wider = getattr(
-                qr_tuned, "flydsl_qrint4_fused_rmsnorm_limit_bytes", None
-            )
-            if wider is None:
-                return None
-            return wider(inp)
-        if isinstance(decision, str):
-            return None
     qr_comm = getattr(group, "qr_comm", None)
     wider = getattr(qr_comm, "flydsl_qrint4_fused_rmsnorm_limit_bytes", None)
     if wider is None:
@@ -315,7 +290,11 @@ def _open_flydsl_quick_allreduce(group, device, rank: int, world_size: int):
 
 
 def _quick_allreduce_with_quant(group, device, quant: str):
-    """Build QuickAllReduce at one codec. Init reads the codec from the env."""
+    """Build one HIP QuickReduce codec. Init reads the codec from the env.
+
+    FlyDSL stays off. The table reaches it through ``qr_flydsl``, and the
+    default QuickReduce is the communicator that injects it.
+    """
     from sglang.srt.distributed.device_communicators.quick_all_reduce import (
         QuickAllReduce,
     )
@@ -324,7 +303,7 @@ def _quick_allreduce_with_quant(group, device, quant: str):
     for name in _QR_QUANT_ENVS:
         os.environ[name] = quant
     try:
-        return QuickAllReduce(group, device)
+        return QuickAllReduce(group, device, enable_flydsl_int4=False)
     finally:
         for name, value in previous.items():
             if value is None:
@@ -1206,11 +1185,13 @@ class GroupCoordinator:
     ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
         """Attempt fused all-reduce + RMSNorm. ROCm/HIP only.
 
-        FlyDSL INT4 fuses first, whether that kernel is the tune table's
-        communicator or the one inside the default QuickReduce. A row that
-        kernel owns but cannot fuse returns None, so the caller all-reduces
-        and norms separately. Every other row keeps the custom all-reduce
-        fused kernel below. The plain all-reduce selector is unchanged.
+        FlyDSL INT4 fuses first. That is the tune table's ``qr_flydsl``
+        communicator, or the FlyDSL injected into the default QuickReduce
+        when the table made no choice. A HIP codec from the table, including
+        INT4, does not fuse here. A row that FlyDSL owns but cannot fuse
+        returns None, so the caller all-reduces and norms separately. Every
+        other row keeps the custom all-reduce fused kernel below. The plain
+        all-reduce selector is unchanged.
         """
         handled, fused = _flydsl_qrint4_fused_allreduce_rmsnorm(
             self, input_, residual_inp_, weight_, eps

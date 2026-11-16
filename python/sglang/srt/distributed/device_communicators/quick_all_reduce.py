@@ -86,7 +86,10 @@ class QuickAllReduce:
     }
 
     def __init__(
-        self, group: ProcessGroup, device: Union[int, str, torch.device]
+        self,
+        group: ProcessGroup,
+        device: Union[int, str, torch.device],
+        enable_flydsl_int4: bool = True,
     ) -> None:
         """
         Custom allreduce provides non-destructive acceleration and is
@@ -110,6 +113,9 @@ class QuickAllReduce:
         self.disabled = True
         self._flydsl_int4 = None
         self._ptr = 0
+        # The default communicator injects FlyDSL beside HIP INT4. A tune-table
+        # codec passes False so qr:INT4 stays the HIP kernel.
+        self._enable_flydsl_int4 = enable_flydsl_int4
         if not qr_rocm_arch_available():
             logger.debug(
                 "Custom quick allreduce is only supported on ROCm MI300 series."
@@ -228,12 +234,17 @@ class QuickAllReduce:
                 )
             qr_max_size = qr_max_size * MB
         # If qr_max_size is None, then 2GB is used by default.
-        # HIP QuickReduce always owns its IPC workspace. On gfx950, FlyDSL is
-        # created beside it and takes the bf16 payloads it can run.
+        # HIP QuickReduce always owns its IPC workspace. On gfx950 the default
+        # communicator creates FlyDSL beside it for the bf16 payloads it can
+        # run. A tune-table codec leaves that off and stays on this HIP kernel.
         self._ptr = ops.init_custom_qr(self.rank, self.world_size, qr_max_size)
         self.qr_max_size = qr_max_size if qr_max_size > 0 else ops.qr_max_size()
         self.create_shared_buffer()
-        if self.qr_quant_level == QuickReduceRegime.INT4 and _flydsl_int4_available():
+        if (
+            self._enable_flydsl_int4
+            and self.qr_quant_level == QuickReduceRegime.INT4
+            and _flydsl_int4_available()
+        ):
             self._init_flydsl_int4()
         self.disabled = False
 
