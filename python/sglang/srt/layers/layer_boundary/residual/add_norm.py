@@ -169,22 +169,23 @@ def _fused_ar_rms_max_bytes(input_tensor: torch.Tensor) -> int:
     """Byte ceiling for fused all-reduce + RMSNorm.
 
     Custom all-reduce stops at 64 MB. When FlyDSL INT4 can fuse this row,
-    either from the tune table or from the default QuickReduce, the ceiling
-    is that kernel's workspace instead.
+    the ceiling is its QuickReduce workspace instead, which is what lets a
+    16384-token prefill chunk through.
     """
     limit = _CUSTOM_AR_FUSION_MAX_BYTES
     try:
-        from sglang.srt.distributed.parallel_state import (
-            flydsl_qrint4_fused_limit_bytes,
-            get_tp_group,
-        )
+        from sglang.srt.distributed.parallel_state import get_tp_group
 
-        wider = flydsl_qrint4_fused_limit_bytes(get_tp_group(), input_tensor)
+        qr_comm = getattr(get_tp_group(), "qr_comm", None)
     except Exception:
         return limit
+    wider = getattr(qr_comm, "flydsl_qrint4_fused_rmsnorm_limit_bytes", None)
     if wider is None:
         return limit
-    return max(limit, int(wider))
+    qr_limit = wider(input_tensor)
+    if qr_limit is None:
+        return limit
+    return max(limit, int(qr_limit))
 
 
 def aiter_ar_fusion_enabled_for(forward_mode: ForwardMode) -> bool:

@@ -165,15 +165,32 @@ def _flydsl_qrint4_rmsnorm_args_ok(inp, residual, weight) -> bool:
     )
 
 
-def _raw_flydsl_qrint4_fused_allreduce_rmsnorm(comm, inp, residual, weight, eps):
-    """Fuse on the tune table's FlyDSL communicator.
+def _fused_flydsl_qrint4_allreduce_rmsnorm(comm, inp, residual, weight, eps):
+    """Fuse add-RMSNorm on one FlyDSL INT4 QuickReduce.
 
-    ``(True, None)`` means that communicator owns the row and fusion declined.
-    ``(False, None)`` means it does not own the row.
+    ``(True, pair)`` is the fused result. ``(True, None)`` means this
+    communicator owns the row and fusion declined. ``(False, None)`` means it
+    does not own the row. A default QuickReduce answers through its wrapper
+    methods. The tune table's raw communicator answers through
+    ``allreduce_rmsnorm``.
     """
-    if comm is None or not hasattr(comm, "allreduce_rmsnorm"):
+    if comm is None:
         return False, None
-    if not _flydsl_quick_allreduce_fits(comm, inp):
+    should_fuse = getattr(comm, "should_flydsl_qrint4_fused_allreduce_rmsnorm", None)
+    if should_fuse is not None:
+        if getattr(comm, "disabled", True):
+            return False, None
+        if should_fuse(inp, residual, weight):
+            return True, comm.flydsl_qrint4_fused_allreduce_rmsnorm(
+                inp, residual, weight, eps
+            )
+        uses_flydsl = getattr(comm, "uses_flydsl_int4", None)
+        if uses_flydsl is not None and uses_flydsl(inp):
+            return True, None
+        return False, None
+    if not hasattr(comm, "allreduce_rmsnorm") or not _flydsl_quick_allreduce_fits(
+        comm, inp
+    ):
         return False, None
     supports = getattr(comm, "supports_rmsnorm", None)
     nbytes = inp.numel() * inp.element_size()
@@ -191,77 +208,55 @@ def _raw_flydsl_qrint4_fused_allreduce_rmsnorm(comm, inp, residual, weight, eps)
     return True, (out, residual_out)
 
 
-def _default_flydsl_qrint4_fused_allreduce_rmsnorm(qr_comm, inp, residual, weight, eps):
-    """Fuse on the default QuickReduce when its own FlyDSL INT4 owns the row."""
-    if qr_comm is None or getattr(qr_comm, "disabled", True):
-        return False, None
-    should_fuse = getattr(qr_comm, "should_flydsl_qrint4_fused_allreduce_rmsnorm", None)
-    if should_fuse is not None and should_fuse(inp, residual, weight):
-        return True, qr_comm.flydsl_qrint4_fused_allreduce_rmsnorm(
-            inp, residual, weight, eps
-        )
-    uses_flydsl = getattr(qr_comm, "uses_flydsl_int4", None)
-    if uses_flydsl is not None and uses_flydsl(inp):
-        return True, None
-    return False, None
-
-
-def _flydsl_qrint4_fused_allreduce_rmsnorm(group, inp, residual, weight, eps):
-    """One fusion entry for a tuned FlyDSL row and for the default QuickReduce.
-
-    ``qr_flydsl`` fuses the tune table's FlyDSL communicator. A ``qr:<codec>``
-    name, including ``qr:INT4``, is the HIP QuickReduce and does not fuse here.
-    Any other concrete tuned choice leaves this helper, and the caller keeps
-    the custom all-reduce fused kernel. With no tuned decision, the default
-    QuickReduce fuses the rows its FlyDSL INT4 owns.
-    """
-    tuned = getattr(group, "_tuned_outplace_method", None)
-    if tuned is not None:
-        decision = tuned(inp)
-        if decision == "qr_flydsl":
-            _owned, fused = _raw_flydsl_qrint4_fused_allreduce_rmsnorm(
-                getattr(group, "qr_flydsl_comm", None),
-                inp,
-                residual,
-                weight,
-                eps,
-            )
-            return True, fused
-        if isinstance(decision, str):
-            return False, None
-    return _default_flydsl_qrint4_fused_allreduce_rmsnorm(
-        getattr(group, "qr_comm", None), inp, residual, weight, eps
-    )
-
-
-def flydsl_qrint4_fused_limit_bytes(group, inp) -> Optional[int]:
-    """Workspace ceiling for this row, or None to keep the 64 MB custom-AR cap.
-
-    The ceiling follows the fusion entry. The tuned FlyDSL communicator widens
-    it. A HIP QuickReduce codec from the table, including INT4, keeps the
-    64 MB cap. With no tuned decision the default QuickReduce supplies its
-    FlyDSL ceiling.
-    """
-    tuned = getattr(group, "_tuned_outplace_method", None)
-    if tuned is not None:
-        decision = tuned(inp)
-        if isinstance(decision, str) and decision != "qr_flydsl":
-            return None
-        if decision == "qr_flydsl":
-            comm = getattr(group, "qr_flydsl_comm", None)
-            if comm is None or not _flydsl_quick_allreduce_fits(comm, inp):
-                return None
-            supports = getattr(comm, "supports_rmsnorm", None)
-            nbytes = inp.numel() * inp.element_size()
-            if supports is None or not bool(supports(inp.shape[-1], nbytes)):
-                return None
-            return int(nbytes)
-    qr_comm = getattr(group, "qr_comm", None)
-    wider = getattr(qr_comm, "flydsl_qrint4_fused_rmsnorm_limit_bytes", None)
-    if wider is None:
+def _fused_custom_ar_rmsnorm(ca_comm, inp, residual, weight, eps, world_size: int):
+    """Fused all-reduce + RMSNorm on one custom all-reduce communicator."""
+    if ca_comm is None or getattr(ca_comm, "disabled", True):
         return None
-    return wider(inp)
 
+    # Prefer communicator-native fused API when provided.
+    if hasattr(ca_comm, "fused_allreduce_rmsnorm"):
+        try:
+            return ca_comm.fused_allreduce_rmsnorm(inp, residual, weight, eps)
+        except Exception:
+            # Fall back to custom_fused_ar_rms path below.
+            pass
+
+    if not hasattr(ca_comm, "custom_fused_ar_rms"):
+        return None
+
+    # AITER's C++ dispatch further limits 1-stage to the hidden_dims it supports.
+    if envs.SGLANG_USE_1STAGE_ALLREDUCE.is_set():
+        use_1stage_ar = envs.SGLANG_USE_1STAGE_ALLREDUCE.get()
+    else:
+        total_bytes = inp.numel() * inp.element_size()
+        token_num = inp.numel() // inp.shape[-1]
+        use_1stage_ar = (
+            token_num <= _FUSED_AR_RMS_1STAGE_MAX_TOKENS
+            and total_bytes * world_size <= _FUSED_AR_RMS_1STAGE_MAX_READ_BYTES
+        )
+
+    if (
+        getattr(ca_comm, "_IS_CAPTURING", False)
+        and not torch.cuda.is_current_stream_capturing()
+        and is_in_tc_piecewise_cuda_graph()
+    ):
+        if not hasattr(ca_comm, "fused_ar_rms"):
+            return None
+        return ca_comm.fused_ar_rms(
+            inp,
+            residual,
+            w=weight,
+            eps=eps,
+            registered=False,
+            use_1stage=use_1stage_ar,
+        )
+    return ca_comm.custom_fused_ar_rms(
+        inp,
+        residual,
+        weight,
+        eps,
+        use_1stage_ar,
+    )
 
 
 def _open_flydsl_quick_allreduce(group, device, rank: int, world_size: int):
@@ -1185,71 +1180,41 @@ class GroupCoordinator:
     ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
         """Attempt fused all-reduce + RMSNorm. ROCm/HIP only.
 
-        FlyDSL INT4 fuses first. That is the tune table's ``qr_flydsl``
-        communicator, or the FlyDSL injected into the default QuickReduce
-        when the table made no choice. A HIP codec from the table, including
-        INT4, does not fuse here. A row that FlyDSL owns but cannot fuse
-        returns None, so the caller all-reduces and norms separately. Every
-        other row keeps the custom all-reduce fused kernel below. The plain
-        all-reduce selector is unchanged.
+        The tune decision is the same one the plain all-reduce uses. No
+        decision, including a table row this group cannot run, keeps the
+        default path: FlyDSL INT4 on the default QuickReduce, then the
+        default custom all-reduce. An accepted ``qr_flydsl`` row fuses the
+        raw communicator. An accepted ``sglang_ca``, ``aiter_ca``, or
+        ``car_v2`` row fuses that class. Another accepted row returns None,
+        so the caller all-reduces with that kernel and norms separately.
         """
-        handled, fused = _flydsl_qrint4_fused_allreduce_rmsnorm(
-            self, input_, residual_inp_, weight_, eps
+        decision = self._tuned_outplace_method(input_)
+        if decision == "qr_flydsl":
+            handled, fused = _fused_flydsl_qrint4_allreduce_rmsnorm(
+                self.qr_flydsl_comm, input_, residual_inp_, weight_, eps
+            )
+            if handled:
+                return fused
+        elif decision in ("sglang_ca", "aiter_ca", "car_v2"):
+            tuned_ca = {
+                "sglang_ca": self.ca_sglang_comm,
+                "aiter_ca": self.ca_aiter_comm,
+                "car_v2": self.ca_v2_comm,
+            }[decision]
+            return _fused_custom_ar_rmsnorm(
+                tuned_ca, input_, residual_inp_, weight_, eps, self.world_size
+            )
+        elif decision is not _TUNE_NO_DECISION:
+            return None
+
+        handled, fused = _fused_flydsl_qrint4_allreduce_rmsnorm(
+            self.qr_comm, input_, residual_inp_, weight_, eps
         )
         if handled:
             return fused
-
-        ca_comm = self.ca_comm
-        if ca_comm is None or getattr(ca_comm, "disabled", True):
-            return None
-
-        # Prefer communicator-native fused API when provided.
-        if hasattr(ca_comm, "fused_allreduce_rmsnorm"):
-            try:
-                return ca_comm.fused_allreduce_rmsnorm(
-                    input_, residual_inp_, weight_, eps
-                )
-            except Exception:
-                # Fall back to custom_fused_ar_rms path below.
-                pass
-
-        if not hasattr(ca_comm, "custom_fused_ar_rms"):
-            return None
-
-        # AITER's C++ dispatch further limits 1-stage to the hidden_dims it supports.
-        if envs.SGLANG_USE_1STAGE_ALLREDUCE.is_set():
-            use_1stage_ar = envs.SGLANG_USE_1STAGE_ALLREDUCE.get()
-        else:
-            total_bytes = input_.numel() * input_.element_size()
-            token_num = input_.numel() // input_.shape[-1]
-            use_1stage_ar = (
-                token_num <= _FUSED_AR_RMS_1STAGE_MAX_TOKENS
-                and total_bytes * self.world_size <= _FUSED_AR_RMS_1STAGE_MAX_READ_BYTES
-            )
-
-        if (
-            getattr(ca_comm, "_IS_CAPTURING", False)
-            and not torch.cuda.is_current_stream_capturing()
-            and is_in_tc_piecewise_cuda_graph()
-        ):
-            if not hasattr(ca_comm, "fused_ar_rms"):
-                return None
-            return ca_comm.fused_ar_rms(
-                input_,
-                residual_inp_,
-                w=weight_,
-                eps=eps,
-                registered=False,
-                use_1stage=use_1stage_ar,
-            )
-        fused_outputs = ca_comm.custom_fused_ar_rms(
-            input_,
-            residual_inp_,
-            weight_,
-            eps,
-            use_1stage_ar,
+        return _fused_custom_ar_rmsnorm(
+            self.ca_comm, input_, residual_inp_, weight_, eps, self.world_size
         )
-        return fused_outputs
 
     def fused_allreduce_rmsnorm_quant_per_group(
         self,
