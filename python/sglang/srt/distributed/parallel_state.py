@@ -197,7 +197,7 @@ def _flydsl_qrint4_fused_allreduce_rmsnorm(group, inp, residual, weight, eps):
             return True, fused
         if isinstance(decision, str):
             return False, None
-    return _default_flydsl_qrint4_fused_allreduce_rmsnorm(
+    return c(
         getattr(group, "qr_comm", None), inp, residual, weight, eps
     )
 
