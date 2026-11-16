@@ -842,7 +842,28 @@ class GroupCoordinator:
         weight_: torch.Tensor,
         eps: float,
     ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
-        """Attempt fused all-reduce + RMSNorm via custom all-reduce communicator. ROCm/HIP Only"""
+        """Attempt fused all-reduce + RMSNorm. ROCm/HIP only.
+
+        A payload FlyDSL INT4 QuickReduce owns is fused here when that kernel
+        accepts the row. This does not change the plain all-reduce selector:
+        custom all-reduce is still tried before QuickReduce. If FlyDSL owns
+        the payload but its fused kernel declines, return None so the caller
+        all-reduces and norms separately instead of handing the row to the
+        custom all-reduce fused kernel.
+        """
+        qr_comm = self.qr_comm
+        if qr_comm is not None and not getattr(qr_comm, "disabled", True):
+            should_fuse = getattr(qr_comm, "should_flydsl_qrint4_fused_allreduce_rmsnorm", None)
+            if should_fuse is not None and should_fuse(
+                input_, residual_inp_, weight_
+            ):
+                return qr_comm.flydsl_qrint4_fused_allreduce_rmsnorm(
+                    input_, residual_inp_, weight_, eps
+                )
+            uses_flydsl = getattr(qr_comm, "uses_flydsl_int4", None)
+            if uses_flydsl is not None and uses_flydsl(input_):
+                return None
+
         ca_comm = self.ca_comm
         if ca_comm is None or getattr(ca_comm, "disabled", True):
             return None
