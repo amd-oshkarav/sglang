@@ -103,6 +103,132 @@ _FUSED_AR_RMS_1STAGE_MAX_TOKENS = 80
 _FUSED_AR_RMS_1STAGE_MAX_READ_BYTES = 8 * 128 * 1024
 
 
+def _flydsl_quick_allreduce_fits(comm, tensor) -> bool:
+    """Whether a raw AITER FlyDSL INT4 communicator can run this tensor.
+
+    The tuned path opens that class beside QuickReduce. bf16, a contiguous
+    layout, and 16-byte alignment are the limits it applies, and the class
+    itself refuses anything under ``min_bytes``.
+    """
+    if tensor.dtype != torch.bfloat16 or not tensor.is_contiguous():
+        return False
+    nbytes = tensor.numel() * tensor.element_size()
+    if nbytes % 16 != 0 or tensor.data_ptr() % 16 != 0:
+        return False
+    if hasattr(comm, "is_beneficial"):
+        return bool(comm.is_beneficial(nbytes))
+    return nbytes >= int(getattr(comm, "min_bytes", 0))
+
+
+def _flydsl_qrint4_rmsnorm_args_ok(inp, residual, weight) -> bool:
+    hidden = inp.shape[-1]
+    return (
+        residual.shape == inp.shape
+        and residual.dtype == inp.dtype
+        and residual.is_contiguous()
+        and residual.data_ptr() % 16 == 0
+        and weight.dtype == inp.dtype
+        and weight.shape == (hidden,)
+        and weight.is_contiguous()
+        and weight.data_ptr() % 16 == 0
+    )
+
+
+def _raw_flydsl_qrint4_fused_allreduce_rmsnorm(comm, inp, residual, weight, eps):
+    """Fuse on the tune table's FlyDSL communicator.
+
+    ``(True, None)`` means that communicator owns the row and fusion declined.
+    ``(False, None)`` means it does not own the row.
+    """
+    if comm is None or not hasattr(comm, "allreduce_rmsnorm"):
+        return False, None
+    if not _flydsl_quick_allreduce_fits(comm, inp):
+        return False, None
+    supports = getattr(comm, "supports_rmsnorm", None)
+    nbytes = inp.numel() * inp.element_size()
+    if (
+        supports is None
+        or not bool(supports(inp.shape[-1], nbytes))
+        or not _flydsl_qrint4_rmsnorm_args_ok(inp, residual, weight)
+    ):
+        return True, None
+    out = torch.empty_like(inp)
+    residual_out = torch.empty_like(residual)
+    comm.allreduce_rmsnorm(
+        inp, residual, weight, eps, out, residual_out, gemma_norm=False
+    )
+    return True, (out, residual_out)
+
+
+def _default_flydsl_qrint4_fused_allreduce_rmsnorm(qr_comm, inp, residual, weight, eps):
+    """Fuse on the default QuickReduce when its own FlyDSL INT4 owns the row."""
+    if qr_comm is None or getattr(qr_comm, "disabled", True):
+        return False, None
+    should_fuse = getattr(qr_comm, "should_flydsl_qrint4_fused_allreduce_rmsnorm", None)
+    if should_fuse is not None and should_fuse(inp, residual, weight):
+        return True, qr_comm.flydsl_qrint4_fused_allreduce_rmsnorm(
+            inp, residual, weight, eps
+        )
+    uses_flydsl = getattr(qr_comm, "uses_flydsl_int4", None)
+    if uses_flydsl is not None and uses_flydsl(inp):
+        return True, None
+    return False, None
+
+
+def _flydsl_qrint4_fused_allreduce_rmsnorm(group, inp, residual, weight, eps):
+    """One fusion entry for a tuned FlyDSL row and for a default QuickReduce row.
+
+    A tuned decision names the kernel. ``qr_flydsl`` fuses that communicator.
+    Any other concrete tuned choice leaves this helper, and the caller keeps
+    the custom all-reduce fused kernel. With no tuned decision, the default
+    QuickReduce fuses the rows its FlyDSL INT4 owns.
+    """
+    tuned = getattr(group, "_tuned_outplace_method", None)
+    if tuned is not None:
+        decision = tuned(inp)
+        if decision == "qr_flydsl":
+            _owned, fused = _raw_flydsl_qrint4_fused_allreduce_rmsnorm(
+                getattr(group, "qr_flydsl_comm", None),
+                inp,
+                residual,
+                weight,
+                eps,
+            )
+            return True, fused
+        if isinstance(decision, str):
+            return False, None
+    return _default_flydsl_qrint4_fused_allreduce_rmsnorm(
+        getattr(group, "qr_comm", None), inp, residual, weight, eps
+    )
+
+
+def flydsl_qrint4_fused_limit_bytes(group, inp) -> Optional[int]:
+    """Workspace ceiling for this row, or None to keep the 64 MB custom-AR cap.
+
+    The ceiling follows the same choice as the fusion entry: the tuned FlyDSL
+    communicator when the table selected it, otherwise the default QuickReduce.
+    """
+    tuned = getattr(group, "_tuned_outplace_method", None)
+    if tuned is not None:
+        decision = tuned(inp)
+        if isinstance(decision, str) and decision != "qr_flydsl":
+            return None
+        if decision == "qr_flydsl":
+            comm = getattr(group, "qr_flydsl_comm", None)
+            if comm is None or not _flydsl_quick_allreduce_fits(comm, inp):
+                return None
+            supports = getattr(comm, "supports_rmsnorm", None)
+            nbytes = inp.numel() * inp.element_size()
+            if supports is None or not bool(supports(inp.shape[-1], nbytes)):
+                return None
+            return int(nbytes)
+    qr_comm = getattr(group, "qr_comm", None)
+    wider = getattr(qr_comm, "flydsl_qrint4_fused_rmsnorm_limit_bytes", None)
+    if wider is None:
+        return None
+    return wider(inp)
+
+
 def get_torch_distributed_pg_options(group_name=None):
     if not _is_npu:
         return None
@@ -842,7 +968,20 @@ class GroupCoordinator:
         weight_: torch.Tensor,
         eps: float,
     ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
-        """Attempt fused all-reduce + RMSNorm via custom all-reduce communicator. ROCm/HIP Only"""
+        """Attempt fused all-reduce + RMSNorm. ROCm/HIP only.
+
+        FlyDSL INT4 fuses first, whether that kernel is the tune table's
+        communicator or the one inside the default QuickReduce. A row that
+        kernel owns but cannot fuse returns None, so the caller all-reduces
+        and norms separately. Every other row keeps the custom all-reduce
+        fused kernel below. The plain all-reduce selector is unchanged.
+        """
+        handled, fused = _flydsl_qrint4_fused_allreduce_rmsnorm(
+            self, input_, residual_inp_, weight_, eps
+        )
+        if handled:
+            return fused
+
         ca_comm = self.ca_comm
         if ca_comm is None or getattr(ca_comm, "disabled", True):
             return None
