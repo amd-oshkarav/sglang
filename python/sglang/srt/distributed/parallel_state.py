@@ -1181,33 +1181,12 @@ class GroupCoordinator:
     ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
         """Attempt fused all-reduce + RMSNorm. ROCm/HIP only.
 
-        The tune decision is the same one the plain all-reduce uses. No
-        decision, including a table row this group cannot run, keeps the
-        default path: FlyDSL INT4 on the default QuickReduce, then the
-        default custom all-reduce. An accepted ``qr_flydsl`` row fuses the
-        raw communicator. An accepted ``sglang_ca``, ``aiter_ca``, or
-        ``car_v2`` row fuses that class. Another accepted row returns None,
-        so the caller all-reduces with that kernel and norms separately.
+        Fusion is decided here, before any tune table. FlyDSL INT4 on the
+        default QuickReduce is tried first, then the default custom
+        all-reduce. None means fusion is not possible. The caller then does
+        a separate all-reduce, and that path uses a tune-table row only when
+        the row's communicator can run the tensor.
         """
-        decision = self._tuned_outplace_method(input_)
-        if decision == "qr_flydsl":
-            handled, fused = _fused_flydsl_qrint4_allreduce_rmsnorm(
-                self.qr_flydsl_comm, input_, residual_inp_, weight_, eps
-            )
-            if handled:
-                return fused
-        elif decision in ("sglang_ca", "aiter_ca", "car_v2"):
-            tuned_ca = {
-                "sglang_ca": self.ca_sglang_comm,
-                "aiter_ca": self.ca_aiter_comm,
-                "car_v2": self.ca_v2_comm,
-            }[decision]
-            return _fused_custom_ar_rmsnorm(
-                tuned_ca, input_, residual_inp_, weight_, eps, self.world_size
-            )
-        elif decision is not _TUNE_NO_DECISION:
-            return None
-
         handled, fused = _fused_flydsl_qrint4_allreduce_rmsnorm(
             self.qr_comm, input_, residual_inp_, weight_, eps
         )
