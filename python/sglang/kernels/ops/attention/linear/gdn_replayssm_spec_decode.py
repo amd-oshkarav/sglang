@@ -1125,13 +1125,14 @@ def gdn_replayssm_spec_decode(
     # work across two programs on gfx950.
     if (
         _IS_GFX95
-        and batch_size >= 32
         and max_cache_len == 16
         and max_spec_len == 4
         and q.shape[-1] == 128
         and v.shape[-1] == 128
     ):
-        block_v, num_stages = 128, 1
+        num_stages = 1
+        if batch_size * v.shape[-2] >= 768:
+            block_v = 128
     if is_flush.dtype != torch.int8:
         is_flush = is_flush.to(torch.int8)
 
