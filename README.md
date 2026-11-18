@@ -35,6 +35,11 @@ The stack uses AITER main [`9059673612`](https://github.com/ROCm/aiter/commit/90
 | Stage 2 FP8 tiers | P-1b | `aiter/ops/flydsl/moe_kernels.py`: `if force_reduce or fp8_reduce:` becomes `if force_reduce:`. With `AITER_FLYDSL_STAGE2_FP8=1`, only the prefill reduce tiers write FP8 rows. | `p1b_stage2_fp8/patch_aiter.py` |
 | a4w4 GEMM rows, N 4608, K 8192 | G-1 | Adds `aiter/configs/model_configs/qwen38_2p4t_a4w4_blockscale_tuned_gemm.csv`. [aiter#7441](https://github.com/ROCm/aiter/pull/7441) merged this file on 2026-11-05. | `g1_a4w4_pr7441/` |
 
+The P-1b edit is in the image, but it has no effect on Qwen3.8. A copy of this stack does not need it. Only `AITER_FLYDSL_STAGE2_FP8=1` is necessary.
+
+- The Qwen3.8 atomic tiers use `flydsl_moe2_layout_*` kernels. Their launcher `_flydsl_v2_stage2_wrapper` does not read the override. This is the same in AITER `9059673612` and in AITER main.
+- The clean same-node A/B without the edit gives the same gain: throughput +6.3%, TTFT -11.1%, TPOT -5.7%. With the edit: +6.2%, -8.7%, -5.3% (`p1b_stage2_fp8/P1B_STAGE2_FP8_JIRA.md`, job 269431).
+
 **Warning:** do not move AITER past [`0e072ca50e`](https://github.com/ROCm/aiter/commit/0e072ca50ee78c8e7c686a41a16c03524f92c276) for a copy of this stack. [aiter#5988](https://github.com/ROCm/aiter/pull/5988) puts the Q256 ASM prefill kernel into the E 513 rows at 8192, 16384 and 32768 tokens. The kernel does not read `AITER_FLYDSL_STAGE2_FP8`. On this stack, no MTP, on one node, the rows give 98.4% throughput, 93.4% TTFT and 97.5% TPOT (`p1b_aiter5988/AITER5988_WALKTHROUGH.md`).
 
 ## sgl-amd-mono
