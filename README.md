@@ -56,6 +56,13 @@ The image is a stack of layers on the Q1 image `amdsiloai/sglang-private:v0.5.22
 
 The image of the 2026-11-09 build on `crsuse2-m2m-v3-105` is `sha256:b588607e`.
 
+A build of this branch from source is in the registry: `amdsiloai/sglang-private:v0.5.22-rocm10-mi35x_collector_09_11_qwen_3.8_stack_p2@sha256:cc1594a9ad1388343635bd9fe189a2ef6e22f02863bcb6c685b2adcfd1cc422e`. Job 297596 (`crsuse2-m2m-v3-073`, 2026-11-19 00:18 UTC) built it with `qwen38/spec_decode_mi355/collector_stack_p2/build.sh`:
+
+1. `collector26_mono/Dockerfile` builds this branch (`3590bb919d`) on `lmsysorg/sglang:v0.5.22-rocm10-mi35x@sha256:1438dd8b9000adaefb5828edb1cc5713992815d4296f4ad1a1e98dee4e9c7e5f`, with AITER `9059673612` and sgl-amd-mono `c8b3850aef`.
+2. `g1_a4w4_pr7441/Dockerfile` adds the G-1 CSV.
+
+Against Q1, the pip diff of that image is `apache-tvm-ffi` 0.1.15.post1 to 0.1.16, `pytz` and `tzdata` 2026.5 to 2026.6, and the `sglang` version. The same-node comparison against `qwen38-stack-p2:9059673612` is in `qwen38/spec_decode_mi355/collector_stack_p2/PLAN.md`.
+
 ## Runs
 
 - No MTP: [d07515fc](https://adb-4032599967441609.9.azuredatabricks.net/ml/experiments/1169297213372844/runs/d07515fc226d4484819ecd6d017312f4), YAML `stack_261105/nonmtp/stack_p2.yaml`.
