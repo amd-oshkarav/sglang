@@ -58,6 +58,8 @@ The plugin is [`omirosh/sgl-amd-mono` @ `410ca7872d`](https://github.com/omirosh
 - `layer_block` runs only with `--enforce-shared-experts-fusion`. A step of 16 rows then runs it: no MTP at 9 to 16 requests, NEXTN 3/1/4 at 4 requests. The server log gives "Qwen3.8 monokernel: ... and 2 layer_block launches".
 - Start the server with `--enable-amd-monokernel`.
 
+**Warning:** do not move the plugin to the later heads of #154. The head `05b9dd9fab` (2026-11-19) uses `linear_attn_backend.state_layer_cache` ([sgl-amd-mono#147](https://github.com/sgl-project/sgl-amd-mono/pull/147)). SGLang main has it in `hybrid_linear_attn_backend.py`, but this branch does not. Keep `410ca7872d`.
+
 ## Image
 
 The image is the image of `collector_09_11_qwen_3.8_stack_p2` plus one layer. The job of `qwen38/spec_decode_mi355/collector_stack_p2/` builds the images on the node and pushes them (`collector_stack_p2/build.sh`).
@@ -66,12 +68,23 @@ The image is the image of `collector_09_11_qwen_3.8_stack_p2` plus one layer. Th
 2. `g1_a4w4_pr7441/Dockerfile` adds the G-1 CSV. The result is `amdsiloai/sglang-private:v0.5.22-rocm10-mi35x_collector_09_11_qwen_3.8_stack_p2` (`sha256:cc1594a9ad1388343635bd9fe189a2ef6e22f02863bcb6c685b2adcfd1cc422e`).
 3. `collector_stack_p2/Dockerfile` checks out this branch in `/sgl-workspace/sglang`, installs the plugin pin of `python/pyproject_other.toml` and runs its unit tests. The result is the image of this branch (`sha256:f90b49864d99b8067312ca592d7bc68940712658b9759ee36aac57ba84a82260`).
 
-Job 297596 (`crsuse2-m2m-v3-073`, 2026-11-19 00:18 UTC) built and pushed the digests above. The arms of that job run these images. The first build of job 297397 pushed other digests to the same tags, and the second push replaced them.
+Job 297596 (`crsuse2-m2m-v3-073`, 2026-11-19 00:18 UTC) built and pushed the digests above. The arms of that job run these images. The first build of job 297397 pushed other digests to the same tags, and the second push replaced them. Job 298735 (`crsuse2-m2m-v3-252`) pulled the digests above (`build.sh` with `PULL=1`) and did not build again.
 
 The branch changes only Python files against `3590bb919d`. Thus step 3 gives the same code as a build of this branch from source. For a build from source, give `collector26_mono/Dockerfile` the branch, its head, `SGL_AMD_MONO_COMMIT=410ca7872d8029a5532c39fe1930d9a1b23ac77a` and `SGL_AMD_MONO_TESTS="qwen38_a95b or common or __init__"`, then add step 2.
 
 ## Runs
 
 The runs are in `qwen38/spec_decode_mi355/collector_stack_p2/PLAN.md`: the same-node comparison against `qwen38-stack-p2:9059673612` and `collector_09_11_qwen_3.8_stack_p2`, no MTP and MTP.
+
+The full sweeps and the evals of this image ran in job 298735 on `crsuse2-m2m-v3-252`, 2026-11-19:
+
+| Run | MLflow | Result |
+| --- | --- | --- |
+| No MTP, 12 cells | [718975bd](https://adb-4032599967441609.9.azuredatabricks.net/ml/experiments/1169297213372844/runs/718975bdf2e44f91b676dd526d45fa3b) | 97.5% of the B300 20261026 output throughput. The week 46 best run d07515fc gives 96.0% |
+| MTP, 14 cells | [5121a31e](https://adb-4032599967441609.9.azuredatabricks.net/ml/experiments/4204262422411969/runs/5121a31eb03a4b8da9de278f7681d924) | 110.1% of the B300 20261026 MTP output throughput. The week 46 best run 5f9e0490 gives 108.6% |
+| No MTP, evals | [d3416d63](https://adb-4032599967441609.9.azuredatabricks.net/ml/experiments/1169297213372844/runs/d3416d6337f74d17b0c70e7b54352cd4) | GSM8K, GPQA Diamond, NIAH: inside the noise of the week 46 scores |
+| MTP, evals | [aa13f8de](https://adb-4032599967441609.9.azuredatabricks.net/ml/experiments/4204262422411969/runs/aa13f8de6c884610b833ce76654df706) | GSM8K, GPQA Diamond, NIAH: inside the noise of the week 46 scores |
+
+With MTP, the server can stall for 9 to 13 s before a large prefill batch. In 5121a31e, the stalls fall into 8k c8 and 8k c128. Compare the TPOT of those cells, not the throughput.
 
 The server needs `AITER_FLYDSL_STAGE2_FP8=1`, `ROCM_QUICK_REDUCE_QUANTIZATION=INT4`, `ROCM_QUICK_REDUCE_MAX_SIZE_BYTES_MB=512`, `--enable-aiter-allreduce-fusion`, `--enforce-shared-experts-fusion`, `--linear-attn-prefill-backend flydsl` and `--enable-amd-monokernel`. The YAMLs have the full command: `stack_261105/nonmtp/stack_p2.yaml` (no MTP) and `stack_261105/stack_ar_p2.yaml` (MTP).
