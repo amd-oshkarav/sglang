@@ -1,6 +1,6 @@
 # Week 47 stack_p2 and sgl-amd-mono#154, monokernel plugin
 
-Image: `amdsiloai/sglang-private:v0.5.22-rocm10-mi35x_collector_18_11_qwen_3.8_stack_p2_mono154`. Its local tag on the node is `qwen38-collector:1811-stack-p2-mono154`. The digest comes after the build (section "Image").
+Image: `amdsiloai/sglang-private:v0.5.22-rocm10-mi35x_collector_18_11_qwen_3.8_stack_p2_mono154@sha256:f90b49864d99b8067312ca592d7bc68940712658b9759ee36aac57ba84a82260`. Its local tag on the node is `qwen38-collector:1811-stack-p2-mono154`.
 
 This branch is [`collector_09_11_qwen_3.8_stack_p2`](https://github.com/amd-oshkarav/sglang/tree/collector_09_11_qwen_3.8_stack_p2) (`3590bb919d`) plus two commits. They give the stack the sgl-amd-mono plugin of [sgl-amd-mono#154](https://github.com/sgl-project/sgl-amd-mono/pull/154). That plugin runs the tail of each 16-row decode or verify step as one `layer_block` launch.
 
@@ -63,8 +63,10 @@ The plugin is [`omirosh/sgl-amd-mono` @ `410ca7872d`](https://github.com/omirosh
 The image is the image of `collector_09_11_qwen_3.8_stack_p2` plus one layer. The job of `qwen38/spec_decode_mi355/collector_stack_p2/` builds the images on the node and pushes them (`collector_stack_p2/build.sh`).
 
 1. `collector26_mono/Dockerfile` builds `collector_09_11_qwen_3.8_stack_p2` (`3590bb919d`) from source on `lmsysorg/sglang:v0.5.22-rocm10-mi35x@sha256:1438dd8b9000adaefb5828edb1cc5713992815d4296f4ad1a1e98dee4e9c7e5f`, with AITER `9059673612` and sgl-amd-mono `c8b3850aef`.
-2. `g1_a4w4_pr7441/Dockerfile` adds the G-1 CSV. The result is `amdsiloai/sglang-private:v0.5.22-rocm10-mi35x_collector_09_11_qwen_3.8_stack_p2`.
-3. `collector_stack_p2/Dockerfile` checks out this branch in `/sgl-workspace/sglang`, installs the plugin pin of `python/pyproject_other.toml` and runs its unit tests. The result is the image of this branch.
+2. `g1_a4w4_pr7441/Dockerfile` adds the G-1 CSV. The result is `amdsiloai/sglang-private:v0.5.22-rocm10-mi35x_collector_09_11_qwen_3.8_stack_p2` (`sha256:cc1594a9ad1388343635bd9fe189a2ef6e22f02863bcb6c685b2adcfd1cc422e`).
+3. `collector_stack_p2/Dockerfile` checks out this branch in `/sgl-workspace/sglang`, installs the plugin pin of `python/pyproject_other.toml` and runs its unit tests. The result is the image of this branch (`sha256:f90b49864d99b8067312ca592d7bc68940712658b9759ee36aac57ba84a82260`).
+
+Job 297596 (`crsuse2-m2m-v3-073`, 2026-11-19 00:18 UTC) built and pushed the digests above. The arms of that job run these images. The first build of job 297397 pushed other digests to the same tags, and the second push replaced them.
 
 The branch changes only Python files against `3590bb919d`. Thus step 3 gives the same code as a build of this branch from source. For a build from source, give `collector26_mono/Dockerfile` the branch, its head, `SGL_AMD_MONO_COMMIT=410ca7872d8029a5532c39fe1930d9a1b23ac77a` and `SGL_AMD_MONO_TESTS="qwen38_a95b or common or __init__"`, then add step 2.
 
