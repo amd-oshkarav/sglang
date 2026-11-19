@@ -45,7 +45,7 @@ def _flydsl_int4_available() -> bool:
     QuickAllReduceInt4. Any other host keeps the HIP INT4 kernel.
     """
     from sglang.srt.environ import envs
-    from sglang.srt.utils.device import is_gfx95_supported
+    from sglang.srt.utils import is_gfx95_supported
 
     if not envs.SGLANG_USE_AITER.get():
         return False
@@ -321,6 +321,72 @@ class QuickAllReduce:
             and inp.is_contiguous()
             and inp.data_ptr() % 16 == 0
         )
+
+    def uses_flydsl_int4(self, inp: torch.Tensor) -> bool:
+        """Whether ``quick_all_reduce`` runs ``inp`` through FlyDSL."""
+        return self.should_quick_allreduce(inp) and self._use_flydsl_int4(inp)
+
+    def fused_rmsnorm_limit_bytes(self, inp: torch.Tensor) -> int | None:
+        """Largest all-reduce that FlyDSL can fuse with add-RMSNorm, or None.
+
+        The custom-all-reduce fused kernel stops at its 64 MB pool. FlyDSL
+        stages this fusion through the QuickReduce workspace instead, so a
+        prefill chunk above that pool can still fuse when this returns a size.
+        """
+        if not self.uses_flydsl_int4(inp):
+            return None
+        supports = getattr(self._flydsl_int4, "supports_rmsnorm", None)
+        if supports is None:
+            return None
+        nbytes = inp.numel() * inp.element_size()
+        if not supports(inp.shape[-1], nbytes):
+            return None
+        return int(self.qr_max_size)
+
+    def should_fused_allreduce_rmsnorm(
+        self, inp: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor
+    ) -> bool:
+        """Whether FlyDSL INT4 can fuse this all-reduce with add + RMSNorm.
+
+        ``weight`` is applied as given. Gemma callers already pass ``1 + w``,
+        so this does not set the kernel's Gemma flag.
+        """
+        if not self.uses_flydsl_int4(inp):
+            return False
+        supports = getattr(self._flydsl_int4, "supports_rmsnorm", None)
+        if supports is None:
+            return False
+        hidden = inp.shape[-1]
+        return (
+            bool(supports(hidden, inp.numel() * inp.element_size()))
+            and residual.shape == inp.shape
+            and residual.dtype == inp.dtype
+            and residual.is_contiguous()
+            and residual.data_ptr() % 16 == 0
+            and weight.dtype == inp.dtype
+            and weight.shape == (hidden,)
+            and weight.is_contiguous()
+            and weight.data_ptr() % 16 == 0
+        )
+
+    def fused_allreduce_rmsnorm(
+        self,
+        inp: torch.Tensor,
+        residual: torch.Tensor,
+        weight: torch.Tensor,
+        epsilon: float,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """FlyDSL INT4 all-reduce of ``inp`` fused with add + RMSNorm.
+
+        Returns ``(rmsnorm(allreduce(inp) + residual), allreduce(inp) + residual)``.
+        """
+        assert self._flydsl_int4 is not None
+        out = torch.empty_like(inp)
+        residual_out = torch.empty_like(residual)
+        self._flydsl_int4.allreduce_rmsnorm(
+            inp, residual, weight, epsilon, out, residual_out, gemma_norm=False
+        )
+        return out, residual_out
 
     def close(self):
         flydsl = getattr(self, "_flydsl_int4", None)
