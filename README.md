@@ -2,7 +2,7 @@
 
 Images: `qwen38-mono-ab:760dd51e38-1119` (arm a) and `qwen38-mono-ab:b8c981e11e-1119` (arms off and b). The images are local only. ITT builds each image on the node from the `dockerfile` key of its arm and does not push it to a registry.
 
-This branch is SGLang `b1970bc473` (2026-11-19), the SGLang of the base image, with no SGLang change. The images change only the sgl-amd-mono plugin. The arms are in [`qwen38/spec_decode_mi355/mono_plugin/lb_nofse_offon_1119/`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/tree/2f4e61bcd17636f28b5d495d39f5f3a58949556e/qwen38/spec_decode_mi355/mono_plugin/lb_nofse_offon_1119) of AMD-AGI/amd-silo-ai-tiger-teams-sglang.
+This branch is SGLang `b1970bc473` (2026-11-19), the SGLang of the base image, with no SGLang change. The images change only the sgl-amd-mono plugin. The arms are in [`qwen38/spec_decode_mi355/mono_plugin/lb_nofse_offon_1119/`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/tree/d11dbe93afe0ecdf9d2f21b6973e260337e4e7fb/qwen38/spec_decode_mi355/mono_plugin/lb_nofse_offon_1119) of AMD-AGI/amd-silo-ai-tiger-teams-sglang.
 
 ## SGLang
 
@@ -27,11 +27,11 @@ The plugin comes from [`omirosh/sgl-amd-mono`](https://github.com/omirosh/sgl-am
 | off and b | [`b8c981e11e`](https://github.com/omirosh/sgl-amd-mono/commit/b8c981e11edb3133a7965509a7029d525e454d91) | `q38v3/8-layer-block-nofse` | [sgl-amd-mono#159](https://github.com/sgl-project/sgl-amd-mono/pull/159), draft |
 
 - [sgl-amd-mono#159](https://github.com/sgl-project/sgl-amd-mono/pull/159) is on top of [sgl-amd-mono#156](https://github.com/sgl-project/sgl-amd-mono/pull/156). It runs `layer_block` at 16 rows also without the fused shared expert.
-- The off arms run the image of b without `--monokernel-backend`. Then SGLang serves each step with its own forward.
+- The off arms run the image of b without `--enable-amd-monokernel`. Then SGLang serves each step with its own forward.
 
 ## Image
 
-1. [`ab/Dockerfile`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/2f4e61bcd17636f28b5d495d39f5f3a58949556e/qwen38/spec_decode_mi355/mono_plugin/ab/Dockerfile) starts from `rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261119@sha256:55917fb2b7fc4bf8068a02afd5bd70573c83c50465879a60cc2277fafba9769a` (SGLang `b1970bc473`, AITER `581579ab51`).
+1. [`ab/Dockerfile`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/d11dbe93afe0ecdf9d2f21b6973e260337e4e7fb/qwen38/spec_decode_mi355/mono_plugin/ab/Dockerfile) starts from `rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261119@sha256:55917fb2b7fc4bf8068a02afd5bd70573c83c50465879a60cc2277fafba9769a` (SGLang `b1970bc473`, AITER `581579ab51`).
 2. It checks out the plugin at `PLUGIN_SHA` in `/sgl-workspace/sgl-amd-mono` and installs it with `pip install --no-deps -e .`.
 3. It checks that the plugin registers `Qwen3_5MoeForCausalLM`, and it writes `/etc/sglang-build/manifest.txt`.
 
@@ -39,9 +39,9 @@ For a build from source, check out this branch in `/sgl-workspace/sglang` of the
 
 ## Server flags and environment
 
-- [`gen_yamls.py`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/2f4e61bcd17636f28b5d495d39f5f3a58949556e/qwen38/spec_decode_mi355/mono_plugin/lb_nofse_offon_1119/gen_yamls.py) makes the arms `lb_nofse_offon_1119/fse{off,on}_{nomtp,nextn}_{off,a,b}_r{1,2}.yaml`. FSE on has no off arm. The environment is the `environment` block of these YAMLs.
+- [`gen_yamls.py`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/d11dbe93afe0ecdf9d2f21b6973e260337e4e7fb/qwen38/spec_decode_mi355/mono_plugin/lb_nofse_offon_1119/gen_yamls.py) makes the arms `lb_nofse_offon_1119/fse{off,on}_{nomtp,nextn}_{off,a,b}_r{1,2}.yaml`. FSE on has no off arm. The environment is the `environment` block of these YAMLs.
 - All arms: page 16, FP8 KV, bf16 SSM state, `--disable-radix-cache`, TP8. The GDN projections are online MXFP4, with no Hadamard rotation.
-- The FSE on arms add `--enforce-shared-experts-fusion`. The a and b arms add `--monokernel-backend amd`.
+- The FSE on arms add `--enforce-shared-experts-fusion`. The a and b arms add `--enable-amd-monokernel`. This SGLang refuses `--monokernel-backend amd`: [sglang#45389](https://github.com/sgl-project/sglang/pull/45389) renamed it.
 - Without MTP: 64 running requests, CUDA graphs at 1, 2, 4, 8, 16, 32 and 64 rows.
 - NEXTN 3/1/4 with `--enable-linear-replayssm-spec`: 16 running requests, CUDA graphs at 1, 2, 4, 8 and 16 requests.
 
