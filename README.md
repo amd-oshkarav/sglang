@@ -48,7 +48,7 @@ The serving image is `amdsiloai/sglang-private:v0.5.23-rocm10-mi35x_collector_19
 
 ### sgl-amd-mono#154 layer
 
-Dockerfile: `docker/collector_19_11_mono/Dockerfile` in `AMD-AGI/inference-testing`. The sweep config that builds this tag is `docs/examples/tonight/qwen_3.8_collector_19_11_mono.yaml`, and its `dockerfile.path` is `/app/repos/inference-testing/docker/collector_19_11_mono/Dockerfile`.
+Dockerfile: [`collector_19_11_mono/Dockerfile`](https://adb-4032599967441609.9.azuredatabricks.net/ml/experiments/1169297213372844/runs/5d8e093471b5417aa9d0d8446e92efbf/artifacts?selectedArtifact=5d8e093471b5417aa9d0d8446e92efbf%3Acollector_19_11_mono%2FDockerfile&o=4032599967441609), logged on child run `5d8e0934` of MLflow run `8ddc5f7a`. The sweep config that builds this tag is `docs/examples/tonight/qwen_3.8_collector_19_11_mono.yaml`, and its `dockerfile.path` is `/app/repos/inference-testing/docker/collector_19_11_mono/Dockerfile`.
 
 This file starts `FROM` `amdsiloai/sglang-private:v0.5.23-rocm10-mi35x_collector_19_11_f3371c01_aiter_90596736` and leaves SGLang and AITER as that image built them. It installs the monokernel plugin:
 
@@ -67,7 +67,7 @@ This file starts `FROM` `amdsiloai/sglang-private:v0.5.23-rocm10-mi35x_collector
 
 The tag is `amdsiloai/sglang-private:v0.5.23-rocm10-mi35x_collector_19_11_f3371c01_aiter_90596736`.
 
-Dockerfile: `docker/collector_19_11/Dockerfile` in `AMD-AGI/inference-testing`. The config that builds this tag is `docs/examples/collector/qwen_3.8_collector_19_11.yaml`, and its `dockerfile.path` is `/app/repos/inference-testing/docker/collector_19_11/Dockerfile`.
+`docker/collector_19_11/Dockerfile` and `docker/collector_19_11/aiter_7441.patch` in `AMD-AGI/inference-testing` build this tag. No MLflow run was logged for this pin, so both files are copied below. The only other logged `collector_19_11/Dockerfile` is on run [a0908c0b](https://adb-4032599967441609.9.azuredatabricks.net/ml/experiments/1169297213372844/runs/a0908c0bb697401ba44359fa133476ec/artifacts?selectedArtifact=a0908c0bb697401ba44359fa133476ec%3Acollector_19_11%2FDockerfile&o=4032599967441609), and that one builds AITER `8f4fe9e5`. The config that builds this tag is `docs/examples/collector/qwen_3.8_collector_19_11.yaml`, and its `dockerfile.path` is `/app/repos/inference-testing/docker/collector_19_11/Dockerfile`.
 
 It starts from `lmsysorg/sglang:v0.5.23-rocm10-mi35x` and builds for gfx950:
 
@@ -77,6 +77,267 @@ It starts from `lmsysorg/sglang:v0.5.23-rocm10-mi35x` and builds for gfx950:
 4. Install that checkout in editable mode. The extra is `all_hip` when the base torch is 2.9 or 2.10, and `all_hip_rocm724` otherwise. Torch and Triton stay pinned to the base image, `sgl-eval==0.1.2` is installed, and the build stops if a CUDA wheel was pulled in.
 5. Replace AITER. Clone [ROCm/aiter](https://github.com/ROCm/aiter) `main` and detach at `90596736129ccc0bcf720686cf202067a11f110d` (2026-10-26). That commit is 228 commits before `8f4fe9e5` and is before [aiter#5988](https://github.com/ROCm/aiter/pull/5988). It does not contain [aiter#7441](https://github.com/ROCm/aiter/pull/7441). Apply `aiter_7441.patch`, which is that pull request (`ec91f61f0c`) and adds the two Qwen3.8 TP8 a4w4 GEMM tables (`qwen38_2p4t_a4w4_blockscale_tuned_gemm.csv` and the untuned table, N 4608, K 8192). Reinstall AITER from that tree and import `QuickAllReduceInt4`. The P-1b one-line edit is not applied.
 6. Check again that SGLang is still `f3371c01` and that the FlyDSL GDN prefill backend is present.
+
+
+`docker/collector_19_11/Dockerfile`:
+
+```dockerfile
+# Collector image. Clones amd-oshkarav/sglang collector_19_11 at
+# SGLANG_REV and reinstalls that checkout. Nothing in the SGLang tree
+# is patched.
+#
+# AITER is 90596736 (2026-10-26). That base does not contain aiter#7441
+# or aiter#5988. The only change applied to it is aiter_7441.patch, the
+# two Qwen3.8 TP8 a4w4 GEMM tables from ec91f61f0c. AITER is then
+# reinstalled. 90596736 is 228 commits before 8f4fe9e5, which is the
+# parent of aiter#5988.
+#
+#   docker build -f docker/collector_19_11/Dockerfile \
+#       --build-arg BASE_IMAGE=lmsysorg/sglang:v0.5.23-rocm10-mi35x \
+#       -t amdsiloai/sglang-private:v0.5.23-rocm10-mi35x_collector_19_11_f3371c01_aiter_90596736 \
+#       docker/collector_19_11
+#
+# ITT needs dockerfile.path to be this file:
+#   /app/repos/inference-testing/docker/collector_19_11/Dockerfile
+
+ARG BASE_IMAGE=lmsysorg/sglang:v0.5.23-rocm10-mi35x
+FROM ${BASE_IMAGE}
+
+ARG BASE_IMAGE
+ARG SGLANG_REPO=https://github.com/amd-oshkarav/sglang.git
+ARG SGLANG_BRANCH=collector_19_11
+ARG SGLANG_DIR=/sgl-workspace/sglang
+ARG SGLANG_REV=f3371c01c2f9292a0f4e44ed2de212959c0342f6
+ARG SGLANG_EXTRAS=auto
+ARG SGL_EVAL_VERSION=0.1.2
+ARG AITER_DIR=/sgl-workspace/aiter
+ARG AITER_REPO=https://github.com/ROCm/aiter.git
+ARG AITER_REV=90596736129ccc0bcf720686cf202067a11f110d
+
+ENV GPU_ARCHS=gfx950
+ENV PYTORCH_ROCM_ARCH=gfx950
+ENV AMDGPU_TARGETS=gfx950
+ENV PATH="/root/.cargo/bin:${PATH}"
+ENV CARGO_BUILD_JOBS=4
+
+WORKDIR /sgl-workspace
+
+RUN set -eu; \
+    if command -v cargo >/dev/null 2>&1; then \
+        echo "cargo already present: $(cargo --version)"; \
+    else \
+        curl --proto '=https' --tlsv1.2 --retry 5 --retry-delay 3 \
+            --retry-all-errors -sSf https://sh.rustup.rs | sh -s -- -y; \
+        rustc --version; \
+        cargo --version; \
+    fi
+
+# Blobless rather than shallow: setuptools-scm reads tags and the distance to
+# them, and --depth 1 would install the package as 0.0.0.dev0.
+RUN set -eu; \
+    git config --global --add safe.directory '*'; \
+    python3 -m pip uninstall -y sglang sgl-kernel sgl_kernel 2>/dev/null || true; \
+    rm -rf "${SGLANG_DIR}"; \
+    git clone --filter=blob:none --branch "${SGLANG_BRANCH}" \
+        "${SGLANG_REPO}" "${SGLANG_DIR}"; \
+    cd "${SGLANG_DIR}"; \
+    git checkout --detach "${SGLANG_REV}"; \
+    got="$(git rev-parse HEAD)"; \
+    case "${got}" in \
+        "${SGLANG_REV}"*) ;; \
+        *) echo "ERROR: asked for ${SGLANG_REV}, got ${got}" >&2; exit 1 ;; \
+    esac; \
+    git submodule sync --recursive; \
+    git submodule update --init --recursive; \
+    echo "sglang at ${SGLANG_BRANCH}, HEAD $(git rev-parse HEAD)"
+
+RUN set -eu; \
+    if [ -d "${SGLANG_DIR}/sgl-kernel" ]; then \
+        KERNEL_DIR="${SGLANG_DIR}/sgl-kernel"; \
+    elif [ -d "${SGLANG_DIR}/python/sglang/kernels/aot" ]; then \
+        KERNEL_DIR="${SGLANG_DIR}/python/sglang/kernels/aot"; \
+    else \
+        echo "ERROR: neither sgl-kernel/ nor python/sglang/kernels/aot exists" >&2; \
+        exit 1; \
+    fi; \
+    echo "building kernels from ${KERNEL_DIR}"; \
+    cd "${KERNEL_DIR}"; \
+    if [ -f pyproject_rocm.toml ]; then \
+        rm -f pyproject.toml; \
+        mv pyproject_rocm.toml pyproject.toml; \
+    fi; \
+    AMDGPU_TARGET="${GPU_ARCHS}" python3 setup_rocm.py install
+
+RUN set -eu; \
+    cd "${SGLANG_DIR}"; \
+    if [ ! -f python/pyproject_other.toml ]; then \
+        echo "ERROR: python/pyproject_other.toml is missing" >&2; \
+        exit 1; \
+    fi; \
+    python3 -m pip list --format=freeze | grep -E '^(torch|triton)' > /tmp/constraints.txt; \
+    echo "pinning through the install:"; cat /tmp/constraints.txt; \
+    if [ "${SGLANG_EXTRAS}" = "auto" ]; then \
+        TORCH_MM="$(python3 -c 'import torch; print(".".join(torch.__version__.split(".")[:2]))')"; \
+        case "${TORCH_MM}" in \
+            2.9|2.10) EXTRAS=all_hip ;; \
+            *)        EXTRAS=all_hip_rocm724 ;; \
+        esac; \
+        echo "base torch ${TORCH_MM} -> installing sglang[${EXTRAS}]"; \
+    else \
+        EXTRAS="${SGLANG_EXTRAS}"; \
+    fi; \
+    rm -f python/pyproject.toml; \
+    mv python/pyproject_other.toml python/pyproject.toml; \
+    python3 -m pip install --no-cache-dir -c /tmp/constraints.txt -e "python[${EXTRAS}]"; \
+    if [ -n "${SGL_EVAL_VERSION}" ]; then \
+        python3 -m pip install --no-cache-dir -c /tmp/constraints.txt \
+            "sgl-eval==${SGL_EVAL_VERSION}"; \
+    fi; \
+    if python3 -m pip list --format=freeze | grep -Eq '^nvidia-.*-cu[0-9]+'; then \
+        echo "ERROR: CUDA runtime packages were pulled into the ROCm image" >&2; \
+        python3 -m pip list --format=freeze | grep -E '^nvidia-' >&2; \
+        exit 1; \
+    fi; \
+    python3 -c "import torch; assert torch.version.hip, torch.__version__; print('torch', torch.__version__, 'HIP', torch.version.hip)"
+
+# 90596736 is before aiter#5988 and does not contain aiter#7441.
+# The patch adds only that pull request's two GEMM tables, then AITER
+# is reinstalled from the patched tree.
+COPY aiter_7441.patch /tmp/aiter_7441.patch
+RUN set -eu; \
+    python3 -m pip uninstall -y amd-aiter; \
+    rm -rf "${AITER_DIR}"; \
+    git clone --branch main --recursive "${AITER_REPO}" "${AITER_DIR}"; \
+    cd "${AITER_DIR}"; \
+    git checkout --detach "${AITER_REV}"; \
+    got="$(git rev-parse HEAD)"; \
+    case "${got}" in \
+        "${AITER_REV}"*) ;; \
+        *) echo "ERROR: asked for AITER ${AITER_REV}, got ${got}" >&2; exit 1 ;; \
+    esac; \
+    git submodule sync --recursive; \
+    git submodule update --init --recursive; \
+    test ! -f aiter/configs/model_configs/qwen38_2p4t_a4w4_blockscale_tuned_gemm.csv; \
+    git apply --check /tmp/aiter_7441.patch; \
+    git apply /tmp/aiter_7441.patch; \
+    test -f aiter/configs/model_configs/qwen38_2p4t_a4w4_blockscale_tuned_gemm.csv; \
+    test -f aiter/configs/model_configs/qwen38_2p4t_a4w4_blockscale_untuned_gemm.csv; \
+    rm -rf aiter/jit/build aiter/jit/__pycache__; \
+    rm -f aiter/jit/*.so; \
+    python3 -m pip install --no-cache-dir -c /tmp/constraints.txt -r requirements.txt; \
+    AITER_REBUILD=1 python3 setup.py develop; \
+    python3 -c "from aiter.ops.flydsl import QuickAllReduceInt4; print('QuickAllReduceInt4', QuickAllReduceInt4)"; \
+    echo "aiter ${got} plus aiter#7441"
+
+RUN set -eu; \
+    cd "${SGLANG_DIR}"; \
+    got="$(git rev-parse HEAD)"; \
+    case "${got}" in \
+        "${SGLANG_REV}"*) ;; \
+        *) echo "ERROR: collector image expected ${SGLANG_REV}, got ${got}" >&2; exit 1 ;; \
+    esac; \
+    test -f python/sglang/srt/layers/attention/linear/kernels/gdn_flydsl.py; \
+    grep -q "linear-attn-prefill-backend flydsl" \
+        python/sglang/srt/layers/attention/linear/gdn_backend.py; \
+    echo "collector_19_11 ${got}"
+
+LABEL org.opencontainers.image.base.name="${BASE_IMAGE}" \
+      ai.amd.sglang.repo="${SGLANG_REPO}" \
+      ai.amd.sglang.branch="${SGLANG_BRANCH}" \
+      ai.amd.sglang.commit="${SGLANG_REV}" \
+      ai.amd.aiter.repo="${AITER_REPO}" \
+      ai.amd.aiter.commit="${AITER_REV}" \
+      ai.amd.sglang.arm="collector-19-11"
+
+WORKDIR /sgl-workspace/sglang
+```
+
+`docker/collector_19_11/aiter_7441.patch`:
+
+```diff
+commit ec91f61f0c550811cf121f0b0dc667c09524b161
+Author:     Mikko Tukiainen <mikko.tukiainen@amd.com>
+AuthorDate: Thu Nov 5 05:41:31 2026 +0200
+Commit:     GitHub <noreply@github.com>
+CommitDate: Thu Nov 5 11:41:31 2026 +0800
+
+    Add gfx950 a4w4 GEMM configs for Qwen3.8-2.4T's GDN in_proj_qkvz at TP8 (#7441)
+    
+    N=4608, K=8192, 26 values of M from 1 to 16384, tuned with
+    gemm_a4w4_blockscale_tune.py. An ASM kernel wins at every M, with error
+    ratio 0. vLLM's AITER MXFP4 linear takes the ASM FP4 GEMM only for shapes
+    tuned here, so this projection moves off the Triton GEMM.
+    
+    Signed-off-by: Mikko Tukiainen <Mikko.Tukiainen@amd.com>
+    Co-authored-by: Cursor <cursoragent@cursor.com>
+
+diff --git a/aiter/configs/model_configs/qwen38_2p4t_a4w4_blockscale_tuned_gemm.csv b/aiter/configs/model_configs/qwen38_2p4t_a4w4_blockscale_tuned_gemm.csv
+new file mode 100644
+index 00000000..2bc4cd88
+--- /dev/null
++++ b/aiter/configs/model_configs/qwen38_2p4t_a4w4_blockscale_tuned_gemm.csv
+@@ -0,0 +1,27 @@
++gfx,cu_num,M,N,K,kernelId,splitK,us,kernelName,tflops,bw,errRatio
++gfx950,256,1,4608,8192,21,0,12.8814,_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E,5.86,1466.28,0.0
++gfx950,256,2,4608,8192,21,0,13.0145,_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E,11.6,1452.3,0.0
++gfx950,256,4,4608,8192,21,0,13.7312,_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E,21.99,1378.44,0.0
++gfx950,256,8,4608,8192,21,0,14.0,_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E,43.14,1355.78,0.0
++gfx950,256,16,4608,8192,21,0,13.7937,_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E,87.57,1383.77,0.0
++gfx950,256,32,4608,8192,21,0,14.7886,_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E,163.36,1305.08,0.0
++gfx950,256,48,4608,8192,21,0,14.4768,_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E,250.32,1347.9,0.0
++gfx950,256,64,4608,8192,21,0,14.4303,_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E,334.84,1367.01,0.0
++gfx950,256,80,4608,8192,21,0,13.8809,_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E,435.12,1436.46,0.0
++gfx950,256,96,4608,8192,21,0,14.9973,_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E,483.27,1343.73,0.0
++gfx950,256,112,4608,8192,21,0,14.506,_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E,582.91,1403.92,0.0
++gfx950,256,128,4608,8192,21,0,14.9112,_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E,648.08,1380.06,0.0
++gfx950,256,144,4608,8192,21,0,14.7405,_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E,737.54,1410.49,0.0
++gfx950,256,160,4608,8192,21,0,14.3645,_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E,840.93,1462.24,0.0
++gfx950,256,176,4608,8192,21,0,14.82,_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E,896.6,1431.67,0.0
++gfx950,256,192,4608,8192,21,0,14.3398,_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E,1010.86,1494.46,0.0
++gfx950,256,208,4608,8192,21,0,14.9174,_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E,1052.7,1450.87,0.0
++gfx950,256,224,4608,8192,21,0,15.1367,_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E,1117.25,1443.92,0.0
++gfx950,256,240,4608,8192,29,0,15.885,_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_64x128E,1140.66,1389.31,0.0
++gfx950,256,256,4608,8192,29,0,16.3101,_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_64x128E,1184.99,1366.16,0.0
++gfx950,256,512,4608,8192,37,0,20.5976,_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_96x128E,1876.66,1247.24,0.0
++gfx950,256,1024,4608,8192,46,0,28.1637,_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_160x128E,2745.0,1154.18,0.0
++gfx950,256,2048,4608,8192,47,0,45.7475,_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_160x256E,3379.83,1008.52,0.0
++gfx950,256,4096,4608,8192,47,0,85.1955,_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_160x256E,3629.74,861.55,0.0
++gfx950,256,8192,4608,8192,52,0,154.1589,_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_224x256E,4011.93,829.83,0.0
++gfx950,256,16384,4608,8192,54,0,267.4021,_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_256x256E,4625.81,886.22,0.0
+diff --git a/aiter/configs/model_configs/qwen38_2p4t_a4w4_blockscale_untuned_gemm.csv b/aiter/configs/model_configs/qwen38_2p4t_a4w4_blockscale_untuned_gemm.csv
+new file mode 100644
+index 00000000..9285eab0
+--- /dev/null
++++ b/aiter/configs/model_configs/qwen38_2p4t_a4w4_blockscale_untuned_gemm.csv
+@@ -0,0 +1,27 @@
++M,N,K
++1,4608,8192
++2,4608,8192
++4,4608,8192
++8,4608,8192
++16,4608,8192
++32,4608,8192
++48,4608,8192
++64,4608,8192
++80,4608,8192
++96,4608,8192
++112,4608,8192
++128,4608,8192
++144,4608,8192
++160,4608,8192
++176,4608,8192
++192,4608,8192
++208,4608,8192
++224,4608,8192
++240,4608,8192
++256,4608,8192
++512,4608,8192
++1024,4608,8192
++2048,4608,8192
++4096,4608,8192
++8192,4608,8192
++16384,4608,8192
+```
 
 # SGLang: Fast inference for LLMs and multimodal models
 
