@@ -1,8 +1,8 @@
 # Week 47 P7, the wide launches at 32 rows, against P6, monokernel plugin
 
-Images: `qwen38-mono-ab:05b9dd9fab-1120` (arm a, P6) and `qwen38-mono-ab:1806bcb6e0-1120` (arm b, P7). The images are local only. ITT builds each image on the node from the `dockerfile` key of its arm and does not push it to a registry.
+Images: `qwen38-mono-ab:05b9dd9fab-1120` (arm a, P6) and `qwen38-mono-ab:a05e4dac1b-1120` (arm b, P7). The images are local only. ITT builds each image on the node from the `dockerfile` key of its arm and does not push it to a registry.
 
-This branch is SGLang `28e5763574` (2026-11-20), the SGLang of the base image, with no SGLang change. The images change only the sgl-amd-mono plugin. The arms are in [`qwen38/spec_decode_mi355/mono_plugin/wide32/`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/tree/b79bf384ad28d93034f33cdeddc6fc27ab224ab7/qwen38/spec_decode_mi355/mono_plugin/wide32) of AMD-AGI/amd-silo-ai-tiger-teams-sglang.
+This branch is SGLang `28e5763574` (2026-11-20), the SGLang of the base image, with no SGLang change. The images change only the sgl-amd-mono plugin. The arms are in [`qwen38/spec_decode_mi355/mono_plugin/wide32/`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/tree/6cdfc1ad1d914e6db34b97f97f2864be02976d82/qwen38/spec_decode_mi355/mono_plugin/wide32) of AMD-AGI/amd-silo-ai-tiger-teams-sglang.
 
 ## SGLang
 
@@ -24,16 +24,17 @@ The plugin comes from [`omirosh/sgl-amd-mono`](https://github.com/omirosh/sgl-am
 | Arm | Plugin commit | Branch | Pull request |
 | --- | --- | --- | --- |
 | a (P6) | [`05b9dd9fab`](https://github.com/omirosh/sgl-amd-mono/commit/05b9dd9fabf8418cfe8efa7c2d9ab8780be2fb68) | `q38v3/6-layer-block` | [sgl-amd-mono#154](https://github.com/sgl-project/sgl-amd-mono/pull/154) |
-| b (P7) | [`1806bcb6e0`](https://github.com/omirosh/sgl-amd-mono/commit/1806bcb6e0b616910f060d1115a78aabf97e1a07) | `q38v3/9-wide32` | Not open yet |
+| b (P7) | [`a05e4dac1b`](https://github.com/omirosh/sgl-amd-mono/commit/a05e4dac1b1490af6f9bf06e4aab676769e20099) | `q38v3/9-wide32` | Not open yet |
 
-- `1806bcb6e0` is `05b9dd9fab` and 3 commits:
+- `a05e4dac1b` is `05b9dd9fab` and 4 commits:
   - `6553a56`: the wide decode kernels of [vllm#67421](https://github.com/vllm-project/vllm/pull/67421) and [vllm#67678](https://github.com/vllm-project/vllm/pull/67678), with each wait under the plugin guard.
   - `8bb884f`: the 32-row decode and verify steps run one wide launch for each layer, after SGLang's attention or GDN.
   - `1806bcb`: the kernel test and the e2e checks at 32 rows.
+  - `a05e4da`: the e2e test passes `--enable-amd-monokernel` when SGLang has it. The kernels are the kernels of `1806bcb`.
 
 ## Image
 
-1. [`ab/Dockerfile`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/b79bf384ad28d93034f33cdeddc6fc27ab224ab7/qwen38/spec_decode_mi355/mono_plugin/ab/Dockerfile) starts from `rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261120@sha256:d548ce1ad6479ec8004521e1964a464ebecd8b1f28b4625cf05b88646264a386` (SGLang `28e5763574`, AITER `581579ab51`).
+1. [`ab/Dockerfile`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/6cdfc1ad1d914e6db34b97f97f2864be02976d82/qwen38/spec_decode_mi355/mono_plugin/ab/Dockerfile) starts from `rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261120@sha256:d548ce1ad6479ec8004521e1964a464ebecd8b1f28b4625cf05b88646264a386` (SGLang `28e5763574`, AITER `581579ab51`).
 2. It checks out the plugin at `PLUGIN_SHA` in `/sgl-workspace/sgl-amd-mono` and installs it with `pip install --no-deps -e .`.
 3. It checks that the plugin registers `Qwen3_5MoeForCausalLM`, and it writes `/etc/sglang-build/manifest.txt`.
 
@@ -41,8 +42,8 @@ For a build from source, check out this branch in `/sgl-workspace/sglang` of the
 
 ## Server flags and environment
 
-- [`gen_yamls.py`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/b79bf384ad28d93034f33cdeddc6fc27ab224ab7/qwen38/spec_decode_mi355/mono_plugin/wide32/gen_yamls.py) makes the arms `wide32/{nomtp,nextn}_{a,b}_{r1,r2,g2,g3}.yaml` and the gates `wide32/{nomtp,nextn}_b_gate.yaml`. The environment is the `environment` block of these YAMLs.
-- All arms: `--monokernel-backend amd`, `--enforce-shared-experts-fusion`, page 16, FP8 KV, bf16 SSM state, `--disable-radix-cache`, TP8. The GDN projections are online MXFP4, with no Hadamard rotation.
+- [`gen_yamls.py`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/6cdfc1ad1d914e6db34b97f97f2864be02976d82/qwen38/spec_decode_mi355/mono_plugin/wide32/gen_yamls.py) makes the arms `wide32/{nomtp,nextn}_{a,b}_{r1,r2,g2,g3}.yaml` and the gates `wide32/{nomtp,nextn}_b_gate.yaml`. The environment is the `environment` block of these YAMLs.
+- All arms: `--enable-amd-monokernel` (this SGLang refuses `--monokernel-backend amd`: [sglang#45389](https://github.com/sgl-project/sglang/pull/45389) renamed it), `--enforce-shared-experts-fusion`, page 16, FP8 KV, bf16 SSM state, `--disable-radix-cache`, TP8. The GDN projections are online MXFP4, with no Hadamard rotation.
 - Without MTP: 64 running requests, CUDA graphs at 1, 2, 4, 8, 16, 32 and 64 rows.
 - NEXTN 3/1/4 with `--enable-linear-replayssm-spec`: 16 running requests, CUDA graphs at 1, 2, 4, 8 and 16 requests.
 
