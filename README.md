@@ -67,7 +67,7 @@ This file starts `FROM` `amdsiloai/sglang-private:v0.5.23-rocm10-mi35x_collector
 
 The tag is `amdsiloai/sglang-private:v0.5.23-rocm10-mi35x_collector_19_11_f3371c01_aiter_90596736`.
 
-`docker/collector_19_11/Dockerfile` and `docker/collector_19_11/aiter_7441.patch` in `AMD-AGI/inference-testing` build this tag. No MLflow run was logged for this pin, so both files are copied below. The only other logged `collector_19_11/Dockerfile` is on run [a0908c0b](https://adb-4032599967441609.9.azuredatabricks.net/ml/experiments/1169297213372844/runs/a0908c0bb697401ba44359fa133476ec/artifacts?selectedArtifact=a0908c0bb697401ba44359fa133476ec%3Acollector_19_11%2FDockerfile&o=4032599967441609), and that one builds AITER `8f4fe9e5`. The config that builds this tag is `docs/examples/collector/qwen_3.8_collector_19_11.yaml`, and its `dockerfile.path` is `/app/repos/inference-testing/docker/collector_19_11/Dockerfile`.
+`docker/collector_19_11/Dockerfile` and `docker/collector_19_11/aiter_7441.patch` in `AMD-AGI/inference-testing` build this tag. No MLflow run was logged for this pin, so both files are copied below.
 
 It starts from `lmsysorg/sglang:v0.5.23-rocm10-mi35x` and builds for gfx950:
 
