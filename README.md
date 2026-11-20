@@ -24,9 +24,13 @@ Each row below is one commit on top of that main. The source list is the SGLang 
 
 Qwen3.8-2.4T TP8 FP4 on MI355X. This branch is SGLang `f3371c01c2` (`collector_19_11`). The image that serves it is the collector image plus one layer that installs [sgl-amd-mono#154](https://github.com/sgl-project/sgl-amd-mono/pull/154).
 
+AITER is `90596736129ccc0bcf720686cf202067a11f110d` (2026-10-26). That commit is before [aiter#5988](https://github.com/ROCm/aiter/pull/5988) and does not contain [aiter#7441](https://github.com/ROCm/aiter/pull/7441). The image adds that pull request's two GEMM tables from `ec91f61f0c550811cf121f0b0dc667c09524b161` and does not apply the P-1b edit.
+
+The monokernel is [sgl-project/sgl-amd-mono](https://github.com/sgl-project/sgl-amd-mono) `main` at `32a122031b7b63858c1610370b49a3bf9a215997`, plus the five commits of PR 154 through `05b9dd9fabf8418cfe8efa7c2d9ab8780be2fb68`.
+
 ## Benchmark
 
-The sweep is `docs/examples/tonight/qwen_3.8_collector_19_11_mono.yaml` in `AMD-AGI/inference-testing`. It starts the mono image below and runs `sglang_bench_serve` on random data (`random-range-ratio` 0.8, `request-rate` inf). The cells are:
+The sweep is `docs/examples/tonight/qwen_3.8_collector_19_11_mono.yaml` in `AMD-AGI/inference-testing`. It starts the mono image below and runs `sglang_bench_serve` on random data (`random-range-ratio` 0.8, `request-rate` inf). All twelve cells run:
 
 | ISL | OSL | Conc | Prompts |
 | --- | --- | --- | --- |
@@ -34,19 +38,19 @@ The sweep is `docs/examples/tonight/qwen_3.8_collector_19_11_mono.yaml` in `AMD-
 | 60000 | 600 | 4, 16, 64 | 32, 96, 256 |
 | 128000 | 1024 | 4, 16 | 32, 96 |
 
-In the current copy, 8192/1024 at concurrency 4 is the cell that runs. The other eleven cells are commented out. After the sweep the file has GPQA (`sglang_run_eval`, 32 threads, `max-tokens` 100000, temperature 1.0, top-p 0.95, thinking enabled), also commented out, and RULER `niah_single_2` at 65536 and 131072 (`lm_eval`, 32 concurrent requests), which is enabled.
+GPQA follows the sweep (`sglang_run_eval`, 32 threads, `max-tokens` 100000, temperature 1.0, top-p 0.95, thinking enabled). RULER `niah_single_2` is in the file and commented out. The finished run is [8ddc5f7ab5f545ee8ea7df576191e8d4](https://adb-4032599967441609.9.azuredatabricks.net/ml/experiments/1169297213372844/runs/8ddc5f7ab5f545ee8ea7df576191e8d4?o=4032599967441609).
 
 The server uses `AITER_FLYDSL_STAGE2_FP8=1`, `ROCM_QUICK_REDUCE_QUANTIZATION=INT4`, `ROCM_QUICK_REDUCE_MAX_SIZE_BYTES_MB=512`, `--enable-aiter-allreduce-fusion`, `--enforce-shared-experts-fusion`, `--linear-attn-prefill-backend flydsl` and `--enable-amd-monokernel`. Page size is 16, unified attention and GDN online MXFP4 are on, and the prefill chunk is 16384 tokens.
 
 ## Images
 
-The serving image is `amdsiloai/sglang-private:v0.5.23-rocm10-mi35x_collector_19_11_f3371c01_aiter_8f4fe9e5_mono_32a12203_pr154`. It is the base image plus the sgl-amd-mono layer.
+The serving image is `amdsiloai/sglang-private:v0.5.23-rocm10-mi35x_collector_19_11_f3371c01_aiter_90596736_mono_32a12203_pr154`. It is the base image plus the sgl-amd-mono layer.
 
 ### sgl-amd-mono#154 layer
 
-[collector_19_11_mono/Dockerfile](https://adb-4032599967441609.9.azuredatabricks.net/ml/experiments/1169297213372844/runs/1a3fe7786f314daba6f07674015dbe1c/artifacts?selectedArtifact=1a3fe7786f314daba6f07674015dbe1c%3Acollector_19_11_mono%2FDockerfile&o=4032599967441609), logged on run `1a3fe7786f314daba6f07674015dbe1c`.
+Dockerfile: `docker/collector_19_11_mono/Dockerfile` in `AMD-AGI/inference-testing`. The sweep config that builds this tag is `docs/examples/tonight/qwen_3.8_collector_19_11_mono.yaml`, and its `dockerfile.path` is `/app/repos/inference-testing/docker/collector_19_11_mono/Dockerfile`.
 
-This file starts `FROM` the base image and leaves SGLang and AITER as that image built them. It installs the monokernel plugin:
+This file starts `FROM` `amdsiloai/sglang-private:v0.5.23-rocm10-mi35x_collector_19_11_f3371c01_aiter_90596736` and leaves SGLang and AITER as that image built them. It installs the monokernel plugin:
 
 1. Uninstall any `sgl-amd-mono` already present and clone [sgl-project/sgl-amd-mono](https://github.com/sgl-project/sgl-amd-mono) `main`.
 2. Detach at `32a122031b7b63858c1610370b49a3bf9a215997` and refuse any other commit.
@@ -61,7 +65,9 @@ This file starts `FROM` the base image and leaves SGLang and AITER as that image
 
 ### Base image
 
-[collector_19_11/Dockerfile](https://adb-4032599967441609.9.azuredatabricks.net/ml/experiments/1169297213372844/runs/a0908c0bb697401ba44359fa133476ec/artifacts?selectedArtifact=a0908c0bb697401ba44359fa133476ec%3Acollector_19_11%2FDockerfile&o=4032599967441609), logged on run `a0908c0bb697401ba44359fa133476ec`. The tag is `amdsiloai/sglang-private:v0.5.23-rocm10-mi35x_collector_19_11_f3371c01_aiter_8f4fe9e5`.
+The tag is `amdsiloai/sglang-private:v0.5.23-rocm10-mi35x_collector_19_11_f3371c01_aiter_90596736`.
+
+Dockerfile: `docker/collector_19_11/Dockerfile` in `AMD-AGI/inference-testing`. The config that builds this tag is `docs/examples/collector/qwen_3.8_collector_19_11.yaml`, and its `dockerfile.path` is `/app/repos/inference-testing/docker/collector_19_11/Dockerfile`.
 
 It starts from `lmsysorg/sglang:v0.5.23-rocm10-mi35x` and builds for gfx950:
 
@@ -69,7 +75,7 @@ It starts from `lmsysorg/sglang:v0.5.23-rocm10-mi35x` and builds for gfx950:
 2. Clone [amd-oshkarav/sglang](https://github.com/amd-oshkarav/sglang) branch `collector_19_11` and detach at `f3371c01c2f9292a0f4e44ed2de212959c0342f6`, with submodules. The checkout is used as it is. On top of SGLang main `b1970bc473` that commit carries #39069 (bundled MTP draft path), #40771 (QuickReduce before custom all-reduce), FlyDSL INT4 QuickReduce (`8cb39392`), #47219 (add-RMSNorm in that QuickReduce), #47433 (one ReplaySSM stage on gfx950), #45529 (fused self-attention prepare) and #39595 (FlyDSL GDN prefill).
 3. Build the ROCm kernels from `sgl-kernel` or `python/sglang/kernels/aot`.
 4. Install that checkout in editable mode. The extra is `all_hip` when the base torch is 2.9 or 2.10, and `all_hip_rocm724` otherwise. Torch and Triton stay pinned to the base image, `sgl-eval==0.1.2` is installed, and the build stops if a CUDA wheel was pulled in.
-5. Replace AITER. Clone [ROCm/aiter](https://github.com/ROCm/aiter) `main` and detach at `8f4fe9e5014fdbb52259c9fbaa3d3fe75896a578`, the commit before [aiter#5988](https://github.com/ROCm/aiter/pull/5988). At that commit the expert-513 rows at 8192, 16384 and 32768 tokens are FlyDSL two-stage kernels. Apply `aiter_7441.patch`, which is [aiter#7441](https://github.com/ROCm/aiter/pull/7441) (`ec91f61f0c`) and adds the two Qwen3.8 TP8 a4w4 GEMM tables (`qwen38_2p4t_a4w4_blockscale_tuned_gemm.csv` and the untuned table, N 4608, K 8192). Reinstall AITER from that tree and import `QuickAllReduceInt4`.
+5. Replace AITER. Clone [ROCm/aiter](https://github.com/ROCm/aiter) `main` and detach at `90596736129ccc0bcf720686cf202067a11f110d` (2026-10-26). That commit is 228 commits before `8f4fe9e5` and is before [aiter#5988](https://github.com/ROCm/aiter/pull/5988). It does not contain [aiter#7441](https://github.com/ROCm/aiter/pull/7441). Apply `aiter_7441.patch`, which is that pull request (`ec91f61f0c`) and adds the two Qwen3.8 TP8 a4w4 GEMM tables (`qwen38_2p4t_a4w4_blockscale_tuned_gemm.csv` and the untuned table, N 4608, K 8192). Reinstall AITER from that tree and import `QuickAllReduceInt4`. The P-1b one-line edit is not applied.
 6. Check again that SGLang is still `f3371c01` and that the FlyDSL GDN prefill backend is present.
 
 # SGLang: Fast inference for LLMs and multimodal models
