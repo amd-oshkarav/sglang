@@ -1150,6 +1150,7 @@ class GroupCoordinator:
         self,
         input_: torch.Tensor,
         should_use_pymscclpp_allreduce: Optional[bool] = None,
+        should_use_quick_allreduce: Optional[bool] = None,
     ) -> Optional[str]:
         stage = self._tuned_stage()
         if stage is not None:
@@ -1157,7 +1158,9 @@ class GroupCoordinator:
             if tuned is not None:
                 return tuned
         return self._builtin_outplace_all_reduce_method(
-            input_, should_use_pymscclpp_allreduce
+            input_,
+            should_use_pymscclpp_allreduce=should_use_pymscclpp_allreduce,
+            should_use_quick_allreduce=should_use_quick_allreduce,
         )
 
     def _can_use_flashinfer_allreduce(self, input_: torch.Tensor) -> bool:
