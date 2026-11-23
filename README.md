@@ -25,7 +25,7 @@ The plugin comes from [`omirosh/sgl-amd-mono`](https://github.com/omirosh/sgl-am
 | --- | --- | --- | --- |
 | p (P6) | [`05b9dd9fab`](https://github.com/omirosh/sgl-amd-mono/commit/05b9dd9fabf8418cfe8efa7c2d9ab8780be2fb68) | `q38v3/6-layer-block` | [sgl-amd-mono#154](https://github.com/sgl-project/sgl-amd-mono/pull/154) |
 | a (front16) | [`e7cee030a3`](https://github.com/omirosh/sgl-amd-mono/commit/e7cee030a346cbad8350df5cb85a849ee9ec7fe3) | `q38v3/10-front16` | [sgl-amd-mono#174](https://github.com/sgl-project/sgl-amd-mono/pull/174) |
-| b (P7) | [`343bdf93db`](https://github.com/omirosh/sgl-amd-mono/commit/343bdf93db773066ff62e5005dd348e9307999f5) | `q38v3/9-wide32` | Not open yet |
+| b (P7) | [`343bdf93db`](https://github.com/omirosh/sgl-amd-mono/commit/343bdf93db773066ff62e5005dd348e9307999f5) | `q38v3/9-wide32` | [sgl-amd-mono#180](https://github.com/sgl-project/sgl-amd-mono/pull/180) (draft) |
 
 The head of [sgl-amd-mono#174](https://github.com/sgl-project/sgl-amd-mono/pull/174) is `8046962`. It is `e7cee030a3` and 2 commits that change only an e2e test (`0dcc499`), the README and a docstring (`8046962`). So arm a has the package code of the head.
 
@@ -38,6 +38,8 @@ The head of [sgl-amd-mono#174](https://github.com/sgl-project/sgl-amd-mono/pull/
 - `b16026d`: in a decode step of 32 rows, each GDN layer runs one `gdn` launch, with the GDN front.
 - `9c9d000`: the kernel test checks the GDN front of the wide launches.
 - `343bdf9`: the combine after a TP exchange norms the residual sum before its bf16 rounding, as SGLang's `fused_add_rms_norm`, K1, K2 and `layer_block` do.
+
+The head of [sgl-amd-mono#180](https://github.com/sgl-project/sgl-amd-mono/pull/180) is `e6cfeb1`. It is `343bdf93db` and 2 commits that change only check mode, its kernel test and the README: `67ae31e` (`check_wide32.py`) and `e6cfeb1` (`check.py`, the check-mode part of `spec.py`). So arm b has the code that the bench and the NEXTN verify steps run at the head.
 
 ## Image
 
@@ -54,11 +56,12 @@ For a build from source, check out this branch in `/sgl-workspace/sglang` of the
 - [`gen_yamls.py`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/2ce0370f3fc9ba45b720a1d271c051882919c499/qwen38/spec_decode_mi355/mono_plugin/wide32/gen_yamls.py) (mode `f16`) makes the arms `wide32/f16/nomtp_{a,b}_{r1,r2,g2,g3}.yaml` and `wide32/f16/nomtp_p_{l1,l2}.yaml`. The environment is the `environment` block of these YAMLs.
 - All arms: `--enable-amd-monokernel`, `--enforce-shared-experts-fusion`, page 16, FP8 KV, bf16 SSM state, `--disable-radix-cache`, TP8, no MTP. The GDN projections are online MXFP4, with no Hadamard rotation.
 - 64 running requests, CUDA graphs at 1, 2, 4, 8, 16, 32 and 64 rows. The split launch runs in the decode steps of 16 rows, and the wide launches in the decode steps of 32 rows (P7 only).
+- NEXTN (Change 4): [`gen_yamls.py`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/5dedda2756dd8bd0a8ddd7723e7699d9c2dbc3df/qwen38/spec_decode_mi355/mono_plugin/wide32/gen_yamls.py) (mode `f16nx`) makes the arms [`wide32/f16nx/nextn_{a,b}_{r1,r2,g2,g3}.yaml`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/tree/5dedda2756dd8bd0a8ddd7723e7699d9c2dbc3df/qwen38/spec_decode_mi355/mono_plugin/wide32/f16nx), with the same images and server flags, plus `--speculative-algorithm NEXTN` with 3 steps, top-k 1 and 4 draft tokens, and `--enable-linear-replayssm-spec`. 16 running requests, CUDA graphs at 1, 2, 4, 8 and 16 requests. The wide launches run in the verify steps of 32 rows (8 requests).
 - GPQA and SWE-50: [`p1_acc/serve.sh`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/2ce0370f3fc9ba45b720a1d271c051882919c499/qwen38/spec_decode_mi355/mono_plugin/p1_acc/serve.sh) (cases `p6n`, `front16` and `p7`) with the same server flags. SWE-50 keeps the radix cache.
 
 ## Runs
 
-The MLflow runs and the GPQA and SWE-50 results are in the section `## Change 3` of [`wide32/PLAN.md`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/olga/qwen38/spec_decode_mi355/mono_plugin/wide32/PLAN.md).
+The MLflow runs and the GPQA and SWE-50 results are in the section `## Change 3` of [`wide32/PLAN.md`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/olga/qwen38/spec_decode_mi355/mono_plugin/wide32/PLAN.md). The NEXTN runs (job 305840) are in the section `## Change 4`.
 
 ## Warning
 
