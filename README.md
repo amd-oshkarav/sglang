@@ -1,6 +1,6 @@
 # Qwen3.8 MXFP4 route rows: the pristine nightly with AITER main
 
-Image: `qwen38-pristine-mxfp4:4120f9839`. The image is local only. The registry does not have it. The build log of the job gives its digest.
+Image: `qwen38-pristine-mxfp4:4120f9839`. The image is local only. The registry does not have it. Job 313912 built it on `crsuse2-m2m-v3-218` (2026-11-26, 10:58 to 11:56 UTC). The build log gives the manifest list `sha256:0097d6a00ab9b8d9c60fa5bb0b8bc78680da6b5dad85cfe9dc5870b740283923`, triton 3.9.0 and flydsl 0.5.3. The build log is `~/oob/logs/qwen38-mxfp4/build_313912.log` on the Crusoe login.
 
 This branch is SGLang main `512127045d` (2026-11-26) with no code change. That commit is the SGLang of the nightly image `lmsysorg/sglang-rocm:v0.5.23-rocm10-mi35x-20261126`. The only commit of the branch is this README.
 
