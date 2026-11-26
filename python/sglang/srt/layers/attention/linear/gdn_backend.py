@@ -259,6 +259,21 @@ def validate_gdn_mis_backend(prefill_backend: LinearAttnKernelBackend) -> None:
         raise ValueError("GDN multi-item scoring does not support page-major layout")
 
 
+# HIP long-prefill conv with fused q/k/v split (AITER). Only used for prefills of
+# at least _AITER_GDN_PREFILL_MIN_TOKENS tokens; shorter prefills keep the
+# standard conv.
+_AITER_GDN_PREFILL_MIN_TOKENS = 8192
+_AITER_GDN_PREFILL_AVAILABLE = False
+if _is_hip:
+    try:
+        from aiter.ops.causal_conv1d_fwd_split_qkv import (
+            causal_conv1d_split_qkv_hip_fn,
+        )
+
+        _AITER_GDN_PREFILL_AVAILABLE = True
+    except Exception as e:  # missing AITER or its deps: keep the standard path
+        rank0_log(f"AITER GDN split-QKV prefill conv unavailable: {e}")
+
 if is_cuda():
     from sglang.srt.layers.attention.mamba.causal_conv1d import (
         causal_conv1d_fn as causal_conv1d_fn_cuda,
@@ -1310,6 +1325,54 @@ class GDNAttnBackend(MambaAttnBackendBase):
             **conv_kwargs,
         ).transpose(0, 1)[: mixed_qkv.shape[0]]
 
+    def _prefill_conv_split_qkv_aiter(
+        self,
+        layer: RadixLinearAttention,
+        forward_batch: ForwardBatch,
+        mixed_qkv: torch.Tensor,
+        conv_states: torch.Tensor,
+        cache_indices: torch.Tensor,
+    ) -> Optional[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+        """HIP long prefill: causal conv1d with the q/k/v split fused into its output.
+
+        Returns (query, key, value) shaped like forward_extend's split, or None
+        when the standard conv path must run. The returned q/k are unnormalized,
+        as in the torch.split branch; the extend kernel normalizes them.
+        """
+        seq_len = mixed_qkv.shape[0]
+        if not (
+            _AITER_GDN_PREFILL_AVAILABLE
+            and envs.SGLANG_USE_AITER_GDN_PREFILL_SPLIT_QKV.get()
+            and seq_len >= _AITER_GDN_PREFILL_MIN_TOKENS
+            and self.forward_metadata.conv_block_table is None
+            and not self.forward_metadata.has_mamba_track_mask
+            and mixed_qkv.dtype == torch.bfloat16
+            and conv_states.dtype == torch.bfloat16
+            and conv_states.is_contiguous()
+            and layer.conv_weights.size(1) == 4
+            and layer.activation in ("silu", "swish", None)
+            and layer.q_dim == layer.k_dim
+        ):
+            return None
+
+        query, key, value = causal_conv1d_split_qkv_hip_fn(
+            mixed_qkv.transpose(0, 1).contiguous(),
+            layer.conv_weights,
+            layer.bias,
+            conv_states,
+            self.forward_metadata.query_start_loc,
+            layer.k_dim,
+            layer.v_dim,
+            cache_indices=cache_indices,
+            has_initial_state=forward_batch.extend_prefix_lens > 0,
+            activation=layer.activation,
+        )
+        return (
+            query.view(1, seq_len, layer.num_q_heads, layer.head_q_dim),
+            key.view(1, seq_len, layer.num_k_heads, layer.head_k_dim),
+            value.view(1, seq_len, layer.num_v_heads, layer.head_v_dim),
+        )
+
     @staticmethod
     def _prefill_gates(
         layer: RadixLinearAttention, a: torch.Tensor, b: torch.Tensor
@@ -1493,6 +1556,7 @@ class GDNAttnBackend(MambaAttnBackendBase):
             ssm_states_contig = ssm_states
             state_cache_indices = cache_indices
 
+        aiter_qkv = None
         if is_target_verify:
             batch_size = seq_len // forward_batch.spec_info.draft_token_num
             draft_token_num = forward_batch.spec_info.draft_token_num
@@ -1522,17 +1586,27 @@ class GDNAttnBackend(MambaAttnBackendBase):
                     mixed_qkv_to_track
                 )
 
-            mixed_qkv = self._convolve_prefill(
+            aiter_qkv = self._prefill_conv_split_qkv_aiter(
                 layer,
                 forward_batch,
                 mixed_qkv,
                 conv_states_contig,
                 state_cache_indices,
             )
+            if aiter_qkv is None:
+                mixed_qkv = self._convolve_prefill(
+                    layer,
+                    forward_batch,
+                    mixed_qkv,
+                    conv_states_contig,
+                    state_cache_indices,
+                )
 
         actual_seq_len = mixed_qkv.shape[0]
         qkv_dim = layer.q_dim + layer.k_dim + layer.v_dim
-        if (
+        if aiter_qkv is not None:
+            query, key, value = aiter_qkv
+        elif (
             (is_cuda() or is_hip() or is_xpu())
             and qkv_dim <= MAX_FUSED_QKV_SPLIT_DIM
             and not self._use_strided_target_verify_qkv
