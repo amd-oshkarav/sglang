@@ -1,120 +1,78 @@
-# SGLang: Fast inference for LLMs and multimodal models
+# Qwen3.8 MXFP4 route rows: the pristine nightly with AITER main
 
-<p align="center" id="sglangtop">
-<img src="https://raw.githubusercontent.com/sgl-project/sglang/main/assets/logo.png" alt="SGLang" width="400">
-</p>
+Image: `qwen38-pristine-mxfp4:4120f9839`. The image is local only. The registry does not have it. The build log of the job gives its digest.
 
-<p align="center">
-  <a href="https://pypi.org/project/sglang/"><img src="https://img.shields.io/pypi/v/sglang?style=flat&amp;label=PyPI&amp;labelColor=555555&amp;color=orange" alt="PyPI version"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-green?style=flat&amp;labelColor=555555" alt="License: Apache 2.0"></a>
-  <a href="https://pypistats.org/packages/sglang"><img src="https://img.shields.io/pypi/dm/sglang?style=flat&amp;label=Downloads&amp;labelColor=555555&amp;color=blue" alt="PyPI downloads per month"></a>
-</p>
+This branch is SGLang main `512127045d` (2026-11-26) with no code change. That commit is the SGLang of the nightly image `lmsysorg/sglang-rocm:v0.5.23-rocm10-mi35x-20261126`. The only commit of the branch is this README.
 
-<p align="center">
-  <a href="https://docs.sglang.io/">Docs</a> |
-  <a href="https://cookbook.sglang.io/">Cookbook</a> |
-  <a href="https://www.sglang.io/">Website</a> |
-  <a href="https://lmsys.org/blog/">Blog</a> |
-  <a href="https://slack.sglang.io/">Slack</a>
-</p>
+The image moves AITER to main `4120f9839`. That AITER has the MXFP4 route-row switch of [aiter#7706](https://github.com/ROCm/aiter/pull/7706). The image also has one AITER row edit. The section "AITER" gives it.
 
-SGLang is an open-source inference framework for large language, vision-language, and diffusion models, optimized for agentic workloads, large-scale serving, and RL rollouts. [SGLang Diffusion](https://docs.sglang.io/docs/sglang-diffusion) is its built-in engine for image, video, audio, and action generation, included in this repository and the `sglang` Python package.
+The experiment is [`qwen38/spec_decode_mi355/p1b_mxfp4_rows/PLAN.md`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/olga/qwen38/spec_decode_mi355/p1b_mxfp4_rows/PLAN.md) of `AMD-AGI/amd-silo-ai-tiger-teams-sglang`.
 
-👋 Get started below, or meet the community at [SGLang Events](https://www.sglang.io/events), including meetups, developer meetings, workshops, and office hours.
+## SGLang
 
-> **[SGLang Summit 2026: Meet the builders of open AI](https://www.sglang.io/summit)**<br>
-> **Our flagship annual gathering · November 12–13 · San Francisco**
->
-> Go deep on inference, training, and AI hardware through technical talks, live demos, and hands-on workshops. Bring your deployment challenges and meet the engineers and researchers building the stack.
+| Pull request | Change | On this branch | On SGLang main (2026-11-26) |
+| --- | --- | --- | --- |
+| - | No SGLang change. The image runs `512127045d` as the nightly gives it. | - | - |
 
-## Get Started
+## AITER
 
-Pull the Docker image, which includes SGLang and its dependencies:
+The image uses AITER main [`4120f9839`](https://github.com/ROCm/aiter/commit/4120f98392c0f4437b572b5f131a62444c125435) (2026-11-26). The pin of the nightly image is `581579ab5`.
 
-```bash
-docker pull lmsysorg/sglang:latest
-```
-
-Alternatively, install SGLang in an activated Python environment with uv:
-
-```bash
-uv pip install --prerelease=allow sglang
-```
-
-Next, launch your model:
-
-- [Quickstart](https://docs.sglang.io/docs/get-started/quickstart): Run your first model and send a request.
-- [Cookbook](https://cookbook.sglang.io/): Choose your model and hardware to get a ready-to-run launch command.
-
-## Supported Hardware
-
-SGLang supports a wide range of GPUs, TPUs, NPUs, CPUs, and Apple Silicon platforms.
-
-| Platform | Representative hardware |
-| --- | --- |
-| [NVIDIA](https://docs.sglang.io/docs/hardware-platforms/nvidia-gpus) | B200/B300/GB200/GB300; H100/H200/H800/H20; A100; RTX 30/40/50 series, RTX 6000 Ada / PRO 6000; DGX Spark, Jetson Orin |
-| [AMD](https://docs.sglang.io/docs/hardware-platforms/amd_gpu) | Instinct MI300X, MI325X, MI350X, MI355X |
-| [Google TPU](https://docs.sglang.io/docs/hardware-platforms/tpu) | v6e, v7; [SGLang-TorchTPU](https://github.com/sgl-project/sglang-torchtpu) / [SGL-JAX](https://github.com/sgl-project/sglang-jax) |
-| Intel ([GPU](https://docs.sglang.io/docs/hardware-platforms/xpu) / [CPU](https://docs.sglang.io/docs/hardware-platforms/cpu_server)) | Arc / Arc Pro B-Series GPUs, Xeon CPUs |
-| [Apple Silicon](https://docs.sglang.io/docs/hardware-platforms/apple_metal) | Macs via Metal / MLX |
-| [Huawei Ascend](https://docs.sglang.io/docs/hardware-platforms/ascend-npus/getting-started/installation) | A2, A3, 950PR/DT NPUs |
-| [Moore Threads](https://docs.sglang.io/docs/hardware-platforms/mthreads_gpu) | MTT S5000 GPUs |
-
-Integrations in progress: AWS Trainium, [Alibaba T-Head PPU](https://github.com/sgl-project/sglang/issues/37519), [Cambricon MLU](https://github.com/sgl-project/sglang/pull/26898), Qualcomm QAIC, MetaX, Hygon HCU/DCU, Iluvatar CoreX, and more.
-
-SGLang-TorchTPU brings the SGLang serving engine to Google TPUs through PyTorch, torch_tpu, and Pallas kernels. It supports LLM and vision-language serving on TPU7x (Ironwood), including tensor and expert parallelism across hosts. SGL-JAX provides the JAX-based TPU serving path.
-
-See the [Cookbook](https://cookbook.sglang.io/) and platform guides for model compatibility and setup.
-
-## SGL Ecosystem
-
-| Area | Projects | Purpose |
+| Pull request | Commit | Use in this image |
 | --- | --- | --- |
-| Diffusion | [SGLang Diffusion](https://docs.sglang.io/docs/sglang-diffusion/installation) | Built into SGLang for image, video, audio, and action generation. |
-| Audio | [SGLang Omni](https://github.com/sgl-project/sglang-omni) | Audio model serving for text-to-speech (TTS) and automatic speech recognition (ASR). |
-| Speculative Decoding | [SpecForge](https://github.com/sgl-project/SpecForge) | Train draft models for speculative decoding and deploy them with SGLang. |
-| RL and Post-Training | [Miles](https://github.com/radixark/miles), [slime](https://github.com/THUDM/slime), [AReaL](https://github.com/inclusionAI/AReaL), [Tunix](https://github.com/google/tunix), [verl](https://github.com/volcengine/verl) | Training frameworks that integrate SGLang for rollout generation. |
-| Deployment and Orchestration | [RBG](https://github.com/sgl-project/rbg), [llm-d](https://llm-d.ai/docs/dev/operations/disaggregation/sglang), [Ray Serve](https://docs.ray.io/en/latest/serve/llm/user-guides/sglang.html), [NVIDIA Dynamo](https://docs.nvidia.com/dynamo/backends/sg-lang/reference-guide) | Deploy and scale SGLang inference services with routing, load balancing, and cluster orchestration. |
-| Education | [Mini-SGLang](https://github.com/sgl-project/mini-sglang), [zero-to-sglang](https://github.com/datawhalechina/zero-to-sglang), [DeepLearning.AI course](https://www.deeplearning.ai/short-courses/efficient-inference-with-sglang-text-and-image-generation/) | Learn inference engine design and efficient text and image generation through code and hands-on courses. |
+| [aiter#7706](https://github.com/ROCm/aiter/pull/7706) | `77ea506d9` | `AITER_MXFP4_INTERMEDIATE=1`: stage 2 writes MXFP4 route rows (e2m1 values and one e8m0 scale for each 32 values) |
+| [aiter#8669](https://github.com/ROCm/aiter/pull/8669) | `04500613c` | The FP8 row table for `AITER_FLYDSL_STAGE2_FP8=1` |
 
-## Development and Contributing
+| Edit | AITER file | Change | Source file | On AITER main |
+| --- | --- | --- | --- | --- |
+| FlyDSL rows for both switches | `aiter/configs/model_configs/qwen3_8_2400b_fp4_tuned_fmoe.csv` | Replaces the 3 Q256 rows (E 513 at 8192, 16384 and 32768 tokens) with the 3 FlyDSL reduce rows of `qwen3_8_2400b_fp4_tuned_stage2_fp8_fmoe.csv` of the same commit. The other rows do not change. | The second `RUN` of [`p1b_mxfp4_rows/Dockerfile`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/664a3683324393eab7378cea3c4bf23f7161b23b/qwen38/spec_decode_mi355/p1b_mxfp4_rows/Dockerfile) | No. With FP8 off, main gives the Q256 rows. |
 
-Contributions are welcome, from bug fixes and documentation to model support and performance improvements.
+- triton is 3.9.0 (`.github/scripts/install_triton.sh` of AITER). The nightly has 3.8.
+- FlyDSL is 0.5.x (`requirements.txt` of AITER).
+- torch, torchvision and torchaudio stay at the versions of the nightly. The Dockerfile checks it.
+- The kernels are prebuilt: `PREBUILD_KERNELS=1`, `GPU_ARCHS=gfx950`.
 
-### Development setup
+**Warning:** FP8 wins when both switches are set. Set `AITER_FLYDSL_STAGE2_FP8=0` with `AITER_MXFP4_INTERMEDIATE=1`.
 
-Start from the `lmsysorg/sglang:dev` Docker image, which provides development tools and most dependencies. Clone or mount your SGLang checkout inside the container, then install it in editable mode from the repository root so tests use your local Python changes:
+**Warning:** without the row edit, AITER main gives the Q256 rows of [aiter#5988](https://github.com/ROCm/aiter/pull/5988) at 8192 to 32768 tokens when FP8 is off. Q256 ignores both switches. Then `AITER_MXFP4_INTERMEDIATE=1` has no effect at those token counts.
+
+## sgl-amd-mono
+
+`python/pyproject_other.toml` of `512127045d` pins sgl-amd-mono `32a122031b`. The arms do not set `--enable-amd-monokernel`, so the plugin does not run.
+
+## Image
+
+- Image: `qwen38-pristine-mxfp4:4120f9839`, local only.
+- Base image: `lmsysorg/sglang-rocm:v0.5.23-rocm10-mi35x-20261126@sha256:98b812618fd9b36ec23db015f24c3f3559adef9d2f71426a124f442d57d574b1`.
+- Start commit of the branch: `512127045d`.
+
+[`p1b_mxfp4_rows/gate.sh`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/664a3683324393eab7378cea3c4bf23f7161b23b/qwen38/spec_decode_mi355/p1b_mxfp4_rows/gate.sh) builds the image on the node. The file links are at commit [`664a3683`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/commit/664a3683324393eab7378cea3c4bf23f7161b23b) of `AMD-AGI/amd-silo-ai-tiger-teams-sglang`.
+
+1. The first `RUN` of [`Dockerfile`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/664a3683324393eab7378cea3c4bf23f7161b23b/qwen38/spec_decode_mi355/p1b_mxfp4_rows/Dockerfile) moves AITER in `/sgl-workspace/aiter` from `581579ab5` to `4120f9839`.
+   - It installs the AITER requirements with torch fixed, installs triton 3.9.0, prebuilds the kernels and installs AITER in editable mode.
+   - It checks the SGLang commit, torch, FlyDSL 0.5, the count of the JIT modules and the MXFP4 switch.
+2. The second `RUN` does the row edit (section "AITER"). It writes `/sgl-workspace/mxfp4_rows.txt`.
+3. `gate.sh` imports the server, the GDN backend and the Qwen3.8 model files on GPU 0.
+
+No layer comes from an ITT `dockerfile` key. To build the image from a checkout of `664a3683`:
 
 ```bash
-pip install -e "python"
+docker build -t qwen38-pristine-mxfp4:4120f9839 - < qwen38/spec_decode_mi355/p1b_mxfp4_rows/Dockerfile
 ```
 
-In an activated virtual environment, you can use `uv pip install --prerelease=allow -e "python"` instead. See the [development guide](https://docs.sglang.io/docs/developer_guide/development_guide_using_docker) for container setup and testing.
+## Server
 
-### Contribute
+The arm YAMLs are [`fp8.yaml`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/664a3683324393eab7378cea3c4bf23f7161b23b/qwen38/spec_decode_mi355/p1b_mxfp4_rows/fp8.yaml), [`fp4.yaml`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/664a3683324393eab7378cea3c4bf23f7161b23b/qwen38/spec_decode_mi355/p1b_mxfp4_rows/fp4.yaml) and [`fp4_evals.yaml`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/664a3683324393eab7378cea3c4bf23f7161b23b/qwen38/spec_decode_mi355/p1b_mxfp4_rows/fp4_evals.yaml). [`gen_yamls.py`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/664a3683324393eab7378cea3c4bf23f7161b23b/qwen38/spec_decode_mi355/p1b_mxfp4_rows/gen_yamls.py) writes them.
 
-1. Fork the repository and create a branch for your changes. For larger changes, discuss your proposal in a [GitHub issue](https://github.com/sgl-project/sglang/issues) or on [Slack](https://slack.sglang.io/).
-2. Make your changes, run the relevant tests, and add regression coverage for fixes or new behavior. Run `pre-commit run --all-files` before submitting.
-3. Open a pull request describing the change and how you tested it. Include benchmarks or accuracy evaluations when relevant.
+| Arm | `AITER_FLYDSL_STAGE2_FP8` | `AITER_MXFP4_INTERMEDIATE` |
+| --- | --- | --- |
+| A, FP8 route rows | 1 | 0 |
+| B, MXFP4 route rows | 0 | 1 |
 
-See the [contributor guide](https://docs.sglang.io/docs/developer_guide/contribution_guide) for formatting, testing, and pull request instructions. Documentation contributors can start with the [docs guide](docs/README.md).
+- Environment of both arms: `AITER_LOG_TUNED_CONFIG=1`, `AITER_USE_FLYDSL_MOE_SORTING=1`, `ROCM_QUICK_REDUCE_QUANTIZATION=INT4`, `SAFETENSORS_FAST_GPU=1`, `SGLANG_AITER_HONOR_EXPLICIT_MEM_FRACTION=1`, `SGLANG_USE_AITER=1`, `SGLANG_USE_AITER_UNIFIED_ATTN=1`.
+- Flags of both arms: `--tp-size 8 --attention-backend aiter --chunked-prefill-size 16384 --kv-cache-dtype fp8_e4m3 --mamba-ssm-dtype bfloat16 --enforce-shared-experts-fusion --disable-radix-cache --mem-fraction-static 0.85 --max-running-requests 256 --speculative-algorithm NEXTN --speculative-num-steps 3 --speculative-eagle-topk 1 --speculative-num-draft-tokens 4 --reasoning-parser qwen3 --tool-call-parser qwen3_coder`.
 
-## Community and Sponsorship
+## Results
 
-SGLang is hosted by [LMSYS](https://lmsys.org/about/), a non-profit open-source organization.
-
-- **Community discussions:** Join [Slack](https://slack.sglang.io/) for technical questions and development discussions.
-- **Events:** Find meetups, workshops, and office hours on [SGLang Events](https://www.sglang.io/events).
-- **Updates:** Follow [X](https://x.com/lmsysorg) and [LinkedIn](https://www.linkedin.com/company/sgl-project/) for project updates, and the [LMSYS Blog](https://lmsys.org/blog/) for release announcements and technical articles.
-- **Project resources:** Explore the [documentation](https://docs.sglang.io/), [Cookbook](https://cookbook.sglang.io/), [roadmap](https://roadmap.sglang.io/), [release notes](https://github.com/sgl-project/sglang/releases), [issue tracker](https://github.com/sgl-project/sglang/issues), and [contributor guide](https://docs.sglang.io/docs/developer_guide/contribution_guide).
-- **Contact Us:** For enterprise adoption and deployment, technical consulting, sponsorship, or partnership inquiries, please contact [sglang@lmsys.org](mailto:sglang@lmsys.org).
-- **Contributor sponsorship:** Long-term active SGLang contributors are eligible for coding agent sponsorship, including Cursor, Claude Code, or OpenAI Codex. To apply, email [sglang@lmsys.org](mailto:sglang@lmsys.org) with links to your key commits or pull requests.
-
-## Trusted by Industry and Research
-
-SGLang serves production workloads across AI labs, cloud platforms, enterprises, and universities.
-
-<img src="assets/adoption.png" alt="Organizations adopting SGLang" width="800">
-
-## Acknowledgment
-We learned the design and reused code from the following projects: [Guidance](https://github.com/guidance-ai/guidance), [vLLM](https://github.com/vllm-project/vllm), [LightLLM](https://github.com/ModelTC/lightllm), [FlashInfer](https://github.com/flashinfer-ai/flashinfer), [Outlines](https://github.com/outlines-dev/outlines), and [LMQL](https://github.com/eth-sri/lmql).
+- Op bench (m15-33, AITER `4120f9839`): with MXFP4 rows, `fused_moe` is 12.6% to 14.4% faster than with FP8 rows at 8192 to 32768 tokens. [MLflow](https://adb-4032599967441609.9.azuredatabricks.net/ml/experiments/1169297213372844/runs/d3cd2de1377141c2b1a9c1b03d9a04a7).
+- Serving A/B and evals: the section "MLflow runs" of the PLAN.md.
