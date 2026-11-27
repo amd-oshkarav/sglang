@@ -7,7 +7,7 @@ The week 47 best non-MTP stack of Qwen3.8 on MI355X, plus [aiter#8829](https://g
 | Image | `amdsiloai/sglang-private:collector_261127_qwen_3.8_best_aiter8829@sha256:9c52379874ae345087d4f7ec004f1b65e91c2d03014868331c1ac867956f65ff` |
 | Base image | `lmsysorg/sglang:v0.5.23-rocm10-mi35x@sha256:cff45eca86da10fbe140f85df196ef241e932bbae8036afa45942e633c3ed6c5` |
 | Build files | [`collector/`](collector/): [`Dockerfile`](collector/Dockerfile), [`pip_freeze.txt`](collector/pip_freeze.txt), [`aiter_setup.sh`](collector/aiter_setup.sh), [`aiter_pr8829.patch`](collector/aiter_pr8829.patch) |
-| Runs | MLflow parent: added after the run. ITT YAML [`full.yaml`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/1f11f1441ccfa19e4468081691bd9533ed74cfd9/qwen38/spec_decode_mi355/best_261127_aiter8829/full.yaml) |
+| Runs | [MLflow parent ccedfeb7](https://adb-4032599967441609.9.azuredatabricks.net/ml/experiments/1169297213372844/runs/ccedfeb71c784edb8639bc36398e4d9b) (12 cells, GPQA, NIAH), [chat GSM8K fd748f0c](https://adb-4032599967441609.9.azuredatabricks.net/ml/experiments/1169297213372844/runs/fd748f0c0fed4531a5bde5aec2151136), ITT YAML [`full.yaml`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/1f11f1441ccfa19e4468081691bd9533ed74cfd9/qwen38/spec_decode_mi355/best_261127_aiter8829/full.yaml) |
 
 ## Versions
 
