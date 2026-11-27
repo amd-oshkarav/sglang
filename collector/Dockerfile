@@ -1,10 +1,10 @@
-# collector_261127_qwen_3.8_bets_aiter8829: the image of collector_24_11 (the bets of
+# collector_261127_qwen_3.8_best_aiter8829: the image of collector_24_11 (the best run of
 # week 47 on a newer base) without sglang#39069, plus aiter#8829.
 # Build: docker build --network=host -t amdsiloai/sglang-private:<branch> collector/
 #
 # Three layers on lmsysorg/sglang:v0.5.23-rocm10-mi35x (pinned by digest), as in collector_24_11:
 #
-# 1. SGLang. amd-oshkarav/sglang collector_261127_qwen_3.8_bets_aiter8829 @ SGLANG_REV: sgl-project
+# 1. SGLang. amd-oshkarav/sglang collector_261127_qwen_3.8_best_aiter8829 @ SGLANG_REV: sgl-project
 #    main 88dc7501f5 plus sglang#40771, FlyDSL INT4 QuickReduce (8cb39392), sglang#47219,
 #    sglang#47433, sglang#45529 and sglang#39595. These are the commits of collector_24_11 without
 #    sglang#39069 (the draft path of bundled MTP; this image is for the non-MTP config).
@@ -24,7 +24,7 @@ FROM ${BASE_IMAGE}
 
 ARG BASE_IMAGE
 ARG SGLANG_REPO=https://github.com/amd-oshkarav/sglang.git
-ARG SGLANG_BRANCH=collector_261127_qwen_3.8_bets_aiter8829
+ARG SGLANG_BRANCH=collector_261127_qwen_3.8_best_aiter8829
 ARG SGLANG_DIR=/sgl-workspace/sglang
 ARG SGLANG_REV=271511b7fae0e44279e8037136a9f0070b97a877
 ARG SGLANG_EXTRAS=auto
@@ -166,7 +166,7 @@ RUN set -eu; \
     if grep -q "bundles its MTP draft" python/sglang/srt/arg_groups/speculative_hook.py; then \
         echo "ERROR: sglang#39069 is in the tree" >&2; exit 1; \
     fi; \
-    echo "collector_261127_qwen_3.8_bets_aiter8829 ${got}"
+    echo "collector_261127_qwen_3.8_best_aiter8829 ${got}"
 
 # --enable-amd-monokernel loads the sgl_amd_mono entry point. Installed
 # after sglang so an extra cannot put another copy back. Each PR is the
@@ -231,7 +231,7 @@ LABEL org.opencontainers.image.base.name="${BASE_IMAGE}" \
       ai.amd.sgl_amd_mono.pr="${SGL_AMD_MONO_PRS}" \
       ai.amd.sgl_amd_mono.pr_revs="${SGL_AMD_MONO_PR_REVS}" \
       ai.amd.aiter.patch="aiter#8829 ${AITER_PR8829_HEAD}" \
-      ai.amd.sglang.arm="collector-261127-bets-aiter8829"
+      ai.amd.sglang.arm="collector-261127-best-aiter8829"
 
 RUN python3 -m pip list --format=freeze > /sgl-workspace/pip_freeze.txt
 
