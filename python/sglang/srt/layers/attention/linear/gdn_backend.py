@@ -1,4 +1,5 @@
 import time
+from types import SimpleNamespace
 from typing import Optional, Tuple, Union
 
 import msgspec
@@ -266,6 +267,9 @@ _AITER_GDN_PREFILL_MIN_TOKENS = 8192
 _AITER_GDN_PREFILL_AVAILABLE = False
 if _is_hip:
     try:
+        from aiter.ops.causal_conv1d_fwd_split_qkv import (
+            _pick_tile as _aiter_conv_pick_tile,
+        )
         from aiter.ops.causal_conv1d_fwd_split_qkv import (
             causal_conv1d_split_qkv_hip_fn,
         )
@@ -709,6 +713,7 @@ class GDNAttnBackend(MambaAttnBackendBase):
             )
         )
         self._use_strided_target_verify_qkv = False
+        self._aiter_conv_schedule: Optional[tuple] = None
         # A prefill batch never holds more requests than the pool.
         self.prefill_graph_max_seqs = min(
             self.req_to_token_pool.size, envs.SGLANG_GDN_PREFILL_GRAPH_MAX_SEQS.get()
@@ -1325,6 +1330,40 @@ class GDNAttnBackend(MambaAttnBackendBase):
             **conv_kwargs,
         ).transpose(0, 1)[: mixed_qkv.shape[0]]
 
+    def _aiter_conv_chunk_schedule(
+        self, seq_lens_cpu: tuple[int, ...], block_m: int, device: torch.device
+    ) -> SimpleNamespace:
+        """Launch grid of the AITER split-QKV conv, built once per batch layout.
+
+        Built on the host from the known sequence lengths and shared by every
+        GDN layer: when no schedule is passed, AITER rebuilds it on each call
+        and reads the lengths back from the device, which syncs the stream.
+        """
+        key = (block_m, seq_lens_cpu)
+        cached = self._aiter_conv_schedule
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        seq_ids: list[int] = []
+        chunk_ids: list[int] = []
+        for seq_id, length in enumerate(seq_lens_cpu):
+            num_chunks = (length + block_m - 1) // block_m
+            seq_ids.extend([seq_id] * num_chunks)
+            chunk_ids.extend(range(num_chunks))
+        total = len(seq_ids)
+        packed = torch.tensor(seq_ids + chunk_ids, dtype=torch.int32).pin_memory()
+        packed = packed.to(device, non_blocking=True)
+        schedule = SimpleNamespace(
+            nums_dict={
+                block_m: {
+                    "tot": total,
+                    "batch_ptr": packed[:total],
+                    "token_chunk_offset_ptr": packed[total:],
+                }
+            }
+        )
+        self._aiter_conv_schedule = (key, schedule)
+        return schedule
+
     def _prefill_conv_split_qkv_aiter(
         self,
         layer: RadixLinearAttention,
@@ -1340,6 +1379,9 @@ class GDNAttnBackend(MambaAttnBackendBase):
         as in the torch.split branch; the extend kernel normalizes them.
         """
         seq_len = mixed_qkv.shape[0]
+        query_start_loc = self.forward_metadata.query_start_loc
+        n_seqs = query_start_loc.numel() - 1
+        seq_lens_cpu = forward_batch.extend_seq_lens_cpu
         if not (
             _AITER_GDN_PREFILL_AVAILABLE
             and envs.SGLANG_USE_AITER_GDN_PREFILL_SPLIT_QKV.get()
@@ -1347,25 +1389,39 @@ class GDNAttnBackend(MambaAttnBackendBase):
             and self.forward_metadata.conv_block_table is None
             and not self.forward_metadata.has_mamba_track_mask
             and mixed_qkv.dtype == torch.bfloat16
+            and mixed_qkv.stride(-1) == 1
             and conv_states.dtype == torch.bfloat16
             and conv_states.is_contiguous()
             and layer.conv_weights.size(1) == 4
             and layer.activation in ("silu", "swish", None)
             and layer.q_dim == layer.k_dim
+            and seq_lens_cpu is not None
+            and len(seq_lens_cpu) == n_seqs
         ):
             return None
+        seq_lens_cpu = tuple(seq_lens_cpu)
+        if sum(seq_lens_cpu) != seq_len:
+            return None
 
+        block_m = _aiter_conv_pick_tile(seq_len / max(n_seqs, 1))
+        schedule = self._aiter_conv_chunk_schedule(
+            seq_lens_cpu, block_m, mixed_qkv.device
+        )
         query, key, value = causal_conv1d_split_qkv_hip_fn(
-            mixed_qkv.transpose(0, 1).contiguous(),
+            # Must stay a view (stride(0) == 1): AITER then runs its channel-last
+            # kernel. A contiguous copy selects the generic kernel.
+            mixed_qkv.transpose(0, 1),
             layer.conv_weights,
             layer.bias,
             conv_states,
-            self.forward_metadata.query_start_loc,
+            query_start_loc,
             layer.k_dim,
             layer.v_dim,
             cache_indices=cache_indices,
             has_initial_state=forward_batch.extend_prefix_lens > 0,
             activation=layer.activation,
+            block_m=block_m,
+            metadata=schedule,
         )
         return (
             query.view(1, seq_len, layer.num_q_heads, layer.head_q_dim),
