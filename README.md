@@ -1,13 +1,13 @@
-# collector_261127_qwen_3.8_bets_aiter8829
+# collector_261127_qwen_3.8_best_aiter8829
 
 The week 47 best non-MTP stack of Qwen3.8 on MI355X, plus [aiter#8829](https://github.com/ROCm/aiter/pull/8829): the FlyDSL stage 2 rows also apply with `AITER_MXFP4_INTERMEDIATE=1`.
 
 | Item | Value |
 | --- | --- |
-| Image | `amdsiloai/sglang-private:collector_261127_qwen_3.8_bets_aiter8829@sha256:534f7ecdd775be42327eb65386b9aef324cdb5382e439c4a389b47237833e957` |
+| Image | `amdsiloai/sglang-private:collector_261127_qwen_3.8_best_aiter8829@sha256:9c52379874ae345087d4f7ec004f1b65e91c2d03014868331c1ac867956f65ff` |
 | Base image | `lmsysorg/sglang:v0.5.23-rocm10-mi35x@sha256:cff45eca86da10fbe140f85df196ef241e932bbae8036afa45942e633c3ed6c5` |
 | Build files | [`collector/`](collector/): [`Dockerfile`](collector/Dockerfile), [`pip_freeze.txt`](collector/pip_freeze.txt), [`aiter_setup.sh`](collector/aiter_setup.sh), [`aiter_pr8829.patch`](collector/aiter_pr8829.patch) |
-| Runs | MLflow parent: added after the run. ITT YAML [`full.yaml`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/cd306d1e95b514137883109286faf3c3e0a90ac1/qwen38/spec_decode_mi355/bets_261127_aiter8829/full.yaml) |
+| Runs | MLflow parent: added after the run. ITT YAML [`full.yaml`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/blob/1f11f1441ccfa19e4468081691bd9533ed74cfd9/qwen38/spec_decode_mi355/best_261127_aiter8829/full.yaml) |
 
 ## Versions
 
@@ -17,7 +17,7 @@ The week 47 best non-MTP stack of Qwen3.8 on MI355X, plus [aiter#8829](https://g
 | sgl-kernel | `sglang-kernel` 0.4.10, built from `271511b7fa` | this branch | rebuilt |
 | AITER | `4120f98392` (2026-11-26) plus one patch | ROCm/aiter | 1 patch, section "AITER" |
 | FlyDSL | 0.5.3 | `requirements.txt` of AITER | |
-| sgl-amd-mono | `4cba5b253e` plus 5 commits of PR 154 (HEAD `b12bcd2139`) | sgl-project/sgl-amd-mono | section "sgl-amd-mono" |
+| sgl-amd-mono | `4cba5b253e` plus 5 commits of PR 154, cherry-picked in the build (HEAD `021190585e` in this image) | sgl-project/sgl-amd-mono | section "sgl-amd-mono" |
 | torch | 2.11.0+rocm10.0.0 | base image | none |
 | Triton | 3.8.0+git4cff872c.rocm10.0.0 | base image (`AITER_USE_SYSTEM_TRITON=1`) | none |
 | ROCm | 10.0.0 | base image | none |
@@ -57,8 +57,8 @@ Not ported: [sglang#39069](https://github.com/sgl-project/sglang/pull/39069), th
 ## Build again
 
 ```bash
-git clone --depth 1 --branch collector_261127_qwen_3.8_bets_aiter8829 https://github.com/amd-oshkarav/sglang.git && cd sglang
-docker build --network=host -t amdsiloai/sglang-private:collector_261127_qwen_3.8_bets_aiter8829 collector/
+git clone --depth 1 --branch collector_261127_qwen_3.8_best_aiter8829 https://github.com/amd-oshkarav/sglang.git && cd sglang
+docker build --network=host -t amdsiloai/sglang-private:collector_261127_qwen_3.8_best_aiter8829 collector/
 ```
 
 ## Warnings
