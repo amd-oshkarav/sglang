@@ -1,120 +1,57 @@
-# SGLang: Fast inference for LLMs and multimodal models
+# collector_261128_qwen_3.8_mono_h32
 
-<p align="center" id="sglangtop">
-<img src="https://raw.githubusercontent.com/sgl-project/sglang/main/assets/logo.png" alt="SGLang" width="400">
-</p>
+The 20261127 nightly with [sglang#46059](https://github.com/sgl-project/sglang/pull/46059) (the Hadamard-32 rotation of the online MXFP4 GDN projections) and the Qwen3.8 monokernel stack of sgl-amd-mono with the split and wide launches on the rotated projections, at `5bea396cc3`.
 
-<p align="center">
-  <a href="https://pypi.org/project/sglang/"><img src="https://img.shields.io/pypi/v/sglang?style=flat&amp;label=PyPI&amp;labelColor=555555&amp;color=orange" alt="PyPI version"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-green?style=flat&amp;labelColor=555555" alt="License: Apache 2.0"></a>
-  <a href="https://pypistats.org/packages/sglang"><img src="https://img.shields.io/pypi/dm/sglang?style=flat&amp;label=Downloads&amp;labelColor=555555&amp;color=blue" alt="PyPI downloads per month"></a>
-</p>
-
-<p align="center">
-  <a href="https://docs.sglang.io/">Docs</a> |
-  <a href="https://cookbook.sglang.io/">Cookbook</a> |
-  <a href="https://www.sglang.io/">Website</a> |
-  <a href="https://lmsys.org/blog/">Blog</a> |
-  <a href="https://slack.sglang.io/">Slack</a>
-</p>
-
-SGLang is an open-source inference framework for large language, vision-language, and diffusion models, optimized for agentic workloads, large-scale serving, and RL rollouts. [SGLang Diffusion](https://docs.sglang.io/docs/sglang-diffusion) is its built-in engine for image, video, audio, and action generation, included in this repository and the `sglang` Python package.
-
-👋 Get started below, or meet the community at [SGLang Events](https://www.sglang.io/events), including meetups, developer meetings, workshops, and office hours.
-
-> **[SGLang Summit 2026: Meet the builders of open AI](https://www.sglang.io/summit)**<br>
-> **Our flagship annual gathering · November 12–13 · San Francisco**
->
-> Go deep on inference, training, and AI hardware through technical talks, live demos, and hands-on workshops. Bring your deployment challenges and meet the engineers and researchers building the stack.
-
-## Get Started
-
-Pull the Docker image, which includes SGLang and its dependencies:
-
-```bash
-docker pull lmsysorg/sglang:latest
-```
-
-Alternatively, install SGLang in an activated Python environment with uv:
-
-```bash
-uv pip install --prerelease=allow sglang
-```
-
-Next, launch your model:
-
-- [Quickstart](https://docs.sglang.io/docs/get-started/quickstart): Run your first model and send a request.
-- [Cookbook](https://cookbook.sglang.io/): Choose your model and hardware to get a ready-to-run launch command.
-
-## Supported Hardware
-
-SGLang supports a wide range of GPUs, TPUs, NPUs, CPUs, and Apple Silicon platforms.
-
-| Platform | Representative hardware |
+| Item | Value |
 | --- | --- |
-| [NVIDIA](https://docs.sglang.io/docs/hardware-platforms/nvidia-gpus) | B200/B300/GB200/GB300; H100/H200/H800/H20; A100; RTX 30/40/50 series, RTX 6000 Ada / PRO 6000; DGX Spark, Jetson Orin |
-| [AMD](https://docs.sglang.io/docs/hardware-platforms/amd_gpu) | Instinct MI300X, MI325X, MI350X, MI355X |
-| [Google TPU](https://docs.sglang.io/docs/hardware-platforms/tpu) | v6e, v7; [SGLang-TorchTPU](https://github.com/sgl-project/sglang-torchtpu) / [SGL-JAX](https://github.com/sgl-project/sglang-jax) |
-| Intel ([GPU](https://docs.sglang.io/docs/hardware-platforms/xpu) / [CPU](https://docs.sglang.io/docs/hardware-platforms/cpu_server)) | Arc / Arc Pro B-Series GPUs, Xeon CPUs |
-| [Apple Silicon](https://docs.sglang.io/docs/hardware-platforms/apple_metal) | Macs via Metal / MLX |
-| [Huawei Ascend](https://docs.sglang.io/docs/hardware-platforms/ascend-npus/getting-started/installation) | A2, A3, 950PR/DT NPUs |
-| [Moore Threads](https://docs.sglang.io/docs/hardware-platforms/mthreads_gpu) | MTT S5000 GPUs |
+| Image | `amdsiloai/sglang-private:collector_261128_qwen_3.8_mono_h32@sha256:f478330fd331431b6f16addea8aa0b042b7724b092f51de580149d430a51d529` |
+| Base image | `rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261127@sha256:235b2a4f83ac071b081324bb338dc87210263f997448666ad489141c3594d777` |
+| Build files | [`collector/`](collector/): [`Dockerfile`](collector/Dockerfile), [`pip_freeze.txt`](collector/pip_freeze.txt) |
+| Runs | The e2e test of the plugin (the last entry of Crusoe job 332640). The weekend plan is [`weekend_1128/PLAN.md`](https://github.com/AMD-AGI/amd-silo-ai-tiger-teams-sglang/tree/olga/qwen38/spec_decode_mi355/mono_plugin/weekend_1128). |
 
-Integrations in progress: AWS Trainium, [Alibaba T-Head PPU](https://github.com/sgl-project/sglang/issues/37519), [Cambricon MLU](https://github.com/sgl-project/sglang/pull/26898), Qualcomm QAIC, MetaX, Hygon HCU/DCU, Iluvatar CoreX, and more.
+## Versions
 
-SGLang-TorchTPU brings the SGLang serving engine to Google TPUs through PyTorch, torch_tpu, and Pallas kernels. It supports LLM and vision-language serving on TPU7x (Ironwood), including tensor and expert parallelism across hosts. SGL-JAX provides the JAX-based TPU serving path.
+| Part | Version | Source | Change against the base image |
+| --- | --- | --- | --- |
+| SGLang | `8d612e062a` | this branch: `102a17d4df` (2026-11-27) plus one port commit | [sglang#46059](https://github.com/sgl-project/sglang/pull/46059), section "SGLang" |
+| AITER | `581579ab51` (2026-11-27) | base image | none. It has the rotation of `per_1x32_f4_quant_hip` ([aiter#6734](https://github.com/ROCm/aiter/pull/6734), merged as `55645da932`). |
+| FlyDSL | 0.4.2 | base image | none |
+| sgl-amd-mono | `5bea396cc304312d44d80914c78724c2abf6b680` | [omirosh/sgl-amd-mono](https://github.com/omirosh/sgl-amd-mono/tree/q38v3/15-h32), branch `q38v3/15-h32` | the stack `q38v3/13-stack` (`fb592293c3`) plus one commit, section "sgl-amd-mono" |
+| torch | 2.11.0+rocm10.0.0 | base image | none |
+| Triton | 3.8.0+git669b31ac.rocm10.0.0 | base image | none |
+| ROCm | 10.0.0 | base image | none |
 
-See the [Cookbook](https://cookbook.sglang.io/) and platform guides for model compatibility and setup.
+## SGLang
 
-## SGL Ecosystem
+| Commit | PR | PR head used | Port | State (2026-11-28) |
+| --- | --- | --- | --- | --- |
+| `8d612e062a` | [sglang#46059](https://github.com/sgl-project/sglang/pull/46059) | `122da99f694b0045deba17c085868f3a433d1074` | full | open |
 
-| Area | Projects | Purpose |
-| --- | --- | --- |
-| Diffusion | [SGLang Diffusion](https://docs.sglang.io/docs/sglang-diffusion/installation) | Built into SGLang for image, video, audio, and action generation. |
-| Audio | [SGLang Omni](https://github.com/sgl-project/sglang-omni) | Audio model serving for text-to-speech (TTS) and automatic speech recognition (ASR). |
-| Speculative Decoding | [SpecForge](https://github.com/sgl-project/SpecForge) | Train draft models for speculative decoding and deploy them with SGLang. |
-| RL and Post-Training | [Miles](https://github.com/radixark/miles), [slime](https://github.com/THUDM/slime), [AReaL](https://github.com/inclusionAI/AReaL), [Tunix](https://github.com/google/tunix), [verl](https://github.com/volcengine/verl) | Training frameworks that integrate SGLang for rollout generation. |
-| Deployment and Orchestration | [RBG](https://github.com/sgl-project/rbg), [llm-d](https://llm-d.ai/docs/dev/operations/disaggregation/sglang), [Ray Serve](https://docs.ray.io/en/latest/serve/llm/user-guides/sglang.html), [NVIDIA Dynamo](https://docs.nvidia.com/dynamo/backends/sg-lang/reference-guide) | Deploy and scale SGLang inference services with routing, load balancing, and cluster orchestration. |
-| Education | [Mini-SGLang](https://github.com/sgl-project/mini-sglang), [zero-to-sglang](https://github.com/datawhalechina/zero-to-sglang), [DeepLearning.AI course](https://www.deeplearning.ai/short-courses/efficient-inference-with-sglang-text-and-image-generation/) | Learn inference engine design and efficient text and image generation through code and hands-on courses. |
+The PR adds `SGLANG_ROCM_GDN_ONLINE_MXFP4_HADAMARD` (default on). With it, the online MXFP4 GDN projections (`in_proj_qkvz`, `out_proj`) quantize a Hadamard-32 rotation of the weights and of the activations. The quant state of the layers is `{"hadamard": True, "quant_kwargs": {"hadamard_rotate": True}}`.
 
-## Development and Contributing
+## sgl-amd-mono
 
-Contributions are welcome, from bug fixes and documentation to model support and performance improvements.
+| Commits | PR | PR head used | State (2026-11-28) |
+| --- | --- | --- | --- |
+| up to `fb59229` | the stack, see [`collector_261128_qwen_3.8_mono_stack`](https://github.com/amd-oshkarav/sglang/tree/collector_261128_qwen_3.8_mono_stack) | `fb592293c3` | P6 open, the others draft |
+| `5bea396` | none yet (branch `q38v3/15-h32`) | `5bea396` | The split launch (front16) and the wide launches at 32 rows run on the rotated projections (`mxfp4_h32`), in place of the rotation guard of the stack. |
 
-### Development setup
+## Server
 
-Start from the `lmsysorg/sglang:dev` Docker image, which provides development tools and most dependencies. Clone or mount your SGLang checkout inside the container, then install it in editable mode from the repository root so tests use your local Python changes:
+- Environment: `SGLANG_USE_AITER=1`, `SGLANG_USE_AITER_UNIFIED_ATTN=1`, `AITER_USE_FLYDSL_MOE_SORTING=1`, `ROCM_QUICK_REDUCE_QUANTIZATION=INT4`, `SGLANG_AITER_HONOR_EXPLICIT_MEM_FRACTION=1`.
+- Flags: `--enable-amd-monokernel --tp-size 8 --attention-backend aiter --kv-cache-dtype fp8_e4m3 --mamba-ssm-dtype bfloat16 --page-size 16 --disable-radix-cache --chunked-prefill-size 16384 --mem-fraction-static 0.9 --max-running-requests 64`.
+- `--enforce-shared-experts-fusion` is optional. Without it, the split and wide launches and D2 do not run.
+- `SGLANG_ROCM_GDN_ONLINE_MXFP4_HADAMARD=0` turns the rotation off. The plugin then runs the unrotated formats, as in the stack image.
+
+## Build again
 
 ```bash
-pip install -e "python"
+git clone --depth 1 --branch collector_261128_qwen_3.8_mono_h32 https://github.com/amd-oshkarav/sglang.git && cd sglang
+docker build --network=host -t amdsiloai/sglang-private:collector_261128_qwen_3.8_mono_h32 collector/
 ```
 
-In an activated virtual environment, you can use `uv pip install --prerelease=allow -e "python"` instead. See the [development guide](https://docs.sglang.io/docs/developer_guide/development_guide_using_docker) for container setup and testing.
+## Warnings
 
-### Contribute
-
-1. Fork the repository and create a branch for your changes. For larger changes, discuss your proposal in a [GitHub issue](https://github.com/sgl-project/sglang/issues) or on [Slack](https://slack.sglang.io/).
-2. Make your changes, run the relevant tests, and add regression coverage for fixes or new behavior. Run `pre-commit run --all-files` before submitting.
-3. Open a pull request describing the change and how you tested it. Include benchmarks or accuracy evaluations when relevant.
-
-See the [contributor guide](https://docs.sglang.io/docs/developer_guide/contribution_guide) for formatting, testing, and pull request instructions. Documentation contributors can start with the [docs guide](docs/README.md).
-
-## Community and Sponsorship
-
-SGLang is hosted by [LMSYS](https://lmsys.org/about/), a non-profit open-source organization.
-
-- **Community discussions:** Join [Slack](https://slack.sglang.io/) for technical questions and development discussions.
-- **Events:** Find meetups, workshops, and office hours on [SGLang Events](https://www.sglang.io/events).
-- **Updates:** Follow [X](https://x.com/lmsysorg) and [LinkedIn](https://www.linkedin.com/company/sgl-project/) for project updates, and the [LMSYS Blog](https://lmsys.org/blog/) for release announcements and technical articles.
-- **Project resources:** Explore the [documentation](https://docs.sglang.io/), [Cookbook](https://cookbook.sglang.io/), [roadmap](https://roadmap.sglang.io/), [release notes](https://github.com/sgl-project/sglang/releases), [issue tracker](https://github.com/sgl-project/sglang/issues), and [contributor guide](https://docs.sglang.io/docs/developer_guide/contribution_guide).
-- **Contact Us:** For enterprise adoption and deployment, technical consulting, sponsorship, or partnership inquiries, please contact [sglang@lmsys.org](mailto:sglang@lmsys.org).
-- **Contributor sponsorship:** Long-term active SGLang contributors are eligible for coding agent sponsorship, including Cursor, Claude Code, or OpenAI Codex. To apply, email [sglang@lmsys.org](mailto:sglang@lmsys.org) with links to your key commits or pull requests.
-
-## Trusted by Industry and Research
-
-SGLang serves production workloads across AI labs, cloud platforms, enterprises, and universities.
-
-<img src="assets/adoption.png" alt="Organizations adopting SGLang" width="800">
-
-## Acknowledgment
-We learned the design and reused code from the following projects: [Guidance](https://github.com/guidance-ai/guidance), [vLLM](https://github.com/vllm-project/vllm), [LightLLM](https://github.com/ModelTC/lightllm), [FlashInfer](https://github.com/flashinfer-ai/flashinfer), [Outlines](https://github.com/outlines-dev/outlines), and [LMQL](https://github.com/eth-sri/lmql).
+- The Dockerfile checks out SGLang `8d612e062a` over the SGLang of the base image (`/sgl-workspace/sglang`, an editable install). The build checks that `sglang` imports from that tree and that the PR's environment variable exists.
+- [sglang#46059](https://github.com/sgl-project/sglang/pull/46059) is open. A new PR head can change the quant state that the plugin reads.
+- The wide launches at 32 rows need `--max-running-requests` of 32 or more and CUDA graphs at 32 rows.
