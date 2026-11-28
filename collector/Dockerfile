@@ -1,6 +1,7 @@
 # collector_261128_qwen_3.8_mono_draft: the 20261127 SGLang nightly with the sgl-amd-mono plugin at PLUGIN_SHA of
 # omirosh/sgl-amd-mono, q38v3/21-draft: q38v3/19-all (the image collector_261128_qwen_3.8_mono_all) plus the MTP draft
-# spec (qwen38_a95b_mxfp4/draft.py: K2 runs the tail of the draft layer in the draft steps of 1 to 8 rows), plus
+# spec (qwen38_a95b_mxfp4/draft.py: K2 runs the tail of the draft layer in the draft steps of 1 to 8 rows, the TP
+# ranks split the draft's fc, and the draft's rope runs the fused Triton mrope), plus
 # sgl-project/sglang#53137 at its head 8beb60f9be: the capture check of the runtime skips a draft runner. Without it,
 # a draft spec stops the server startup (since sgl-project/sglang#46210).
 # SGLANG_REV is the [Port] commit on this branch, on SGLANG_BASE of the base image. The build applies the diff
@@ -17,7 +18,7 @@ ARG SGLANG_REV=032ce33b73bffe6b72f94f1147da69580d5a60f8
 ARG PR53137_HEAD=8beb60f9be5f84e4b478059866bdff5ced76711a
 ARG AITER_REV=581579ab51ca26ddd4a08a6aa6aa983a78aaf276
 ARG PLUGIN_REPO=https://github.com/omirosh/sgl-amd-mono.git
-ARG PLUGIN_SHA=3ddb968f06a9726c306102bddae01d58defed4c2
+ARG PLUGIN_SHA=4140b62662fc1bb397cb55343289d08fdb45d2b9
 LABEL ai.amd.base_image="${BASE_IMAGE}" ai.amd.sglang="${SGLANG_REPO}@${SGLANG_REV}" ai.amd.aiter="${AITER_REV}" \
       ai.amd.sglang_pr53137="${PR53137_HEAD}" \
       ai.amd.sgl_amd_mono="${PLUGIN_REPO}@${PLUGIN_SHA}"
@@ -45,6 +46,8 @@ RUN set -eux; \
     python3 -c "import sgl_amd_mono; assert 'Qwen3_5MoeForCausalLM' in {k[0] if isinstance(k, tuple) else k for k in sgl_amd_mono.SPECS}"; \
     python3 -c "import sgl_amd_mono; assert sgl_amd_mono.SPECS['Qwen3_5ForCausalLMMTP', None] == 'sgl_amd_mono.qwen38_a95b_mxfp4.draft:SPEC'"; \
     grep -q '^def _route_draft_steps(' sgl_amd_mono/qwen38_a95b_mxfp4/draft.py; \
+    grep -q '^def _fc_slice(' sgl_amd_mono/qwen38_a95b_mxfp4/draft.py; \
+    grep -q 'positions = positions.expand(3, -1)' sgl_amd_mono/qwen38_a95b_mxfp4/draft.py; \
     python3 -c "import inspect; from sglang.kernels.plugin_kernels.amd.spec import register; assert 'model_type' in inspect.signature(register).parameters"; \
     grep -q '^class Ring(NamedTuple):' sgl_amd_mono/qwen38_a95b_mxfp4/gfx950/gdn.py; \
     grep -q '^def _finish_gdn_replayssm_circular_fold_kernel(' /sgl-workspace/sglang/python/sglang/kernels/ops/attention/linear/gdn_replayssm_spec_decode.py; \
