@@ -3,7 +3,8 @@
 # head f010ef9843: the decode KV write also builds the split-KV plan of vattn_asm, and cu_seqlens_q reuses
 # qo_indptr_unified_decode. The arange and _vattn_seg_plan_kernel launches of each full-attention layer go away.
 # SGLANG_REV is the [Port] commit on this branch, on SGLANG_BASE of the base image. The PR changes Python and Triton
-# files only: the build checks out SGLANG_REV in the editable SGLang tree of the base and checks the changed files.
+# files only: the build applies the diff SGLANG_BASE..SGLANG_REV to the editable SGLang tree of the base, which keeps
+# the ROCm pyproject files of the nightly build, and checks that the 4 files are SGLANG_REV's.
 # No AITER change. SGLANG_AMD_MONO_K1V=0 turns K1v off.
 # Build: docker build --network=host -t amdsiloai/sglang-private:collector_261128_qwen_3.8_mono_all_pr47014 collector/
 ARG BASE_IMAGE=rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261127@sha256:235b2a4f83ac071b081324bb338dc87210263f997448666ad489141c3594d777
@@ -23,13 +24,15 @@ LABEL ai.amd.base_image="${BASE_IMAGE}" ai.amd.sglang="${SGLANG_REPO}@${SGLANG_R
 RUN set -eux; \
     git config --global --add safe.directory '*'; \
     test "$(git -C /sgl-workspace/sglang rev-parse HEAD)" = "${SGLANG_BASE}"; \
-    test -z "$(git -C /sgl-workspace/sglang status --porcelain --untracked-files=no)"; \
     git -C /sgl-workspace/sglang fetch "${SGLANG_REPO}" "${SGLANG_REV}"; \
-    git -C /sgl-workspace/sglang checkout -f "${SGLANG_REV}"; \
-    test "$(git -C /sgl-workspace/sglang rev-parse HEAD)" = "${SGLANG_REV}"; \
-    test "$(git -C /sgl-workspace/sglang rev-parse HEAD~1)" = "${SGLANG_BASE}"; \
-    test "$(git -C /sgl-workspace/sglang diff --name-only "${SGLANG_BASE}" "${SGLANG_REV}" | sort | tr '\n' ' ')" = \
-      "python/sglang/kernels/ops/attention/unified_attention_3d_mtp.py python/sglang/kernels/ops/attention/vattn_asm_gfx950/__init__.py python/sglang/kernels/ops/kvcache/cache_ops.py python/sglang/srt/layers/attention/aiter_backend.py "; \
+    test "$(git -C /sgl-workspace/sglang rev-parse FETCH_HEAD)" = "${SGLANG_REV}"; \
+    test "$(git -C /sgl-workspace/sglang rev-parse "${SGLANG_REV}~1")" = "${SGLANG_BASE}"; \
+    files="python/sglang/kernels/ops/attention/unified_attention_3d_mtp.py python/sglang/kernels/ops/attention/vattn_asm_gfx950/__init__.py python/sglang/kernels/ops/kvcache/cache_ops.py python/sglang/srt/layers/attention/aiter_backend.py"; \
+    test "$(git -C /sgl-workspace/sglang diff --name-only "${SGLANG_BASE}" "${SGLANG_REV}" | sort | tr '\n' ' ')" = "${files} "; \
+    git -C /sgl-workspace/sglang diff --quiet "${SGLANG_BASE}" -- ${files}; \
+    git -C /sgl-workspace/sglang diff "${SGLANG_BASE}" "${SGLANG_REV}" | git -C /sgl-workspace/sglang apply; \
+    git -C /sgl-workspace/sglang diff --quiet "${SGLANG_REV}" -- ${files}; \
+    git -C /sgl-workspace/sglang status --short; \
     python3 -c "import sglang; assert sglang.__file__.startswith('/sgl-workspace/sglang/python/'), sglang.__file__"; \
     grep -q '^def alloc_decode_seg_plan(' /sgl-workspace/sglang/python/sglang/kernels/ops/attention/unified_attention_3d_mtp.py; \
     grep -q '^def seg_plan_program(' /sgl-workspace/sglang/python/sglang/kernels/ops/kvcache/cache_ops.py; \
