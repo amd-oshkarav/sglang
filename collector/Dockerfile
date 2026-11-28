@@ -18,7 +18,7 @@ ARG SGLANG_REV=032ce33b73bffe6b72f94f1147da69580d5a60f8
 ARG PR53137_HEAD=8beb60f9be5f84e4b478059866bdff5ced76711a
 ARG AITER_REV=581579ab51ca26ddd4a08a6aa6aa983a78aaf276
 ARG PLUGIN_REPO=https://github.com/omirosh/sgl-amd-mono.git
-ARG PLUGIN_SHA=4140b62662fc1bb397cb55343289d08fdb45d2b9
+ARG PLUGIN_SHA=c238cff81b73dd6107e1f5c5a2cf9b45971389f2
 LABEL ai.amd.base_image="${BASE_IMAGE}" ai.amd.sglang="${SGLANG_REPO}@${SGLANG_REV}" ai.amd.aiter="${AITER_REV}" \
       ai.amd.sglang_pr53137="${PR53137_HEAD}" \
       ai.amd.sgl_amd_mono="${PLUGIN_REPO}@${PLUGIN_SHA}"
@@ -47,7 +47,7 @@ RUN set -eux; \
     python3 -c "import sgl_amd_mono; assert sgl_amd_mono.SPECS['Qwen3_5ForCausalLMMTP', None] == 'sgl_amd_mono.qwen38_a95b_mxfp4.draft:SPEC'"; \
     grep -q '^def _route_draft_steps(' sgl_amd_mono/qwen38_a95b_mxfp4/draft.py; \
     grep -q '^def _fc_slice(' sgl_amd_mono/qwen38_a95b_mxfp4/draft.py; \
-    grep -q 'positions = positions.expand(3, -1)' sgl_amd_mono/qwen38_a95b_mxfp4/draft.py; \
+    grep -q 'positions = positions.contiguous().expand(3, -1)' sgl_amd_mono/qwen38_a95b_mxfp4/draft.py; \
     python3 -c "import inspect; from sglang.kernels.plugin_kernels.amd.spec import register; assert 'model_type' in inspect.signature(register).parameters"; \
     grep -q '^class Ring(NamedTuple):' sgl_amd_mono/qwen38_a95b_mxfp4/gfx950/gdn.py; \
     grep -q '^def _finish_gdn_replayssm_circular_fold_kernel(' /sgl-workspace/sglang/python/sglang/kernels/ops/attention/linear/gdn_replayssm_spec_decode.py; \
