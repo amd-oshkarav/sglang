@@ -33,7 +33,7 @@ RUN set -eux; \
     git -C /sgl-workspace/sglang diff "${SGLANG_BASE}" "${SGLANG_REV}" | git -C /sgl-workspace/sglang apply; \
     git -C /sgl-workspace/sglang diff --quiet "${SGLANG_REV}" -- ${files}; \
     git -C /sgl-workspace/sglang status --short; \
-    python3 -c "import sglang; assert sglang.__file__.startswith('/sgl-workspace/sglang/python/'), sglang.__file__"; \
+    (cd / && python3 -c "import sglang.srt.layers.attention.aiter_backend as m; assert m.__file__.startswith('/sgl-workspace/sglang/python/'), m.__file__"); \
     grep -q '^def alloc_decode_seg_plan(' /sgl-workspace/sglang/python/sglang/kernels/ops/attention/unified_attention_3d_mtp.py; \
     grep -q '^def seg_plan_program(' /sgl-workspace/sglang/python/sglang/kernels/ops/kvcache/cache_ops.py; \
     grep -q 'seg_plan=seg_plan,' /sgl-workspace/sglang/python/sglang/srt/layers/attention/aiter_backend.py; \
